@@ -1,0 +1,71 @@
+FROM llama3
+TEMPLATE """<|start_header_id|>system<|end_header_id|>
+
+{{ if .System }}{{ .System }}
+{{- end }}
+{{- if .Tools }}When you receive a tool call response, use the output to format an answer to the orginal user question.
+
+You are a helpful assistant with tool calling capabilities.
+{{- end }}<|eot_id|>
+{{- range $i, $_ := .Messages }}
+{{- $last := eq (len (slice $.Messages $i)) 1 }}
+{{- if eq .Role "user" }}<|start_header_id|>user<|end_header_id|>
+{{- if and $.Tools $last }}
+
+Given the following functions, please respond with a JSON for a function call with its proper arguments that best answers the given prompt.
+
+Respond in the format {"name": function name, "parameters": dictionary of argument name and its value}. Do not use variables.
+
+{{ range $.Tools }}
+{{- . }}
+{{ end }}
+{{ .Content }}<|eot_id|>
+{{- else }}
+
+{{ .Content }}<|eot_id|>
+{{- end }}{{ if $last }}<|start_header_id|>assistant<|end_header_id|>
+
+{{ end }}
+{{- else if eq .Role "assistant" }}<|start_header_id|>assistant<|end_header_id|>
+{{- if .ToolCalls }}
+{{ range .ToolCalls }}
+{"name": "{{ .Function.Name }}", "parameters": {{ .Function.Arguments }}}{{ end }}
+{{- else }}
+
+{{ .Content }}
+{{- end }}{{ if not $last }}<|eot_id|>{{ end }}
+{{- else if eq .Role "tool" }}<|start_header_id|>ipython<|end_header_id|>
+
+{{ .Content }}<|eot_id|>{{ if $last }}<|start_header_id|>assistant<|end_header_id|>
+
+{{ end }}
+{{- end }}
+{{- end }}"""
+SYSTEM "
+You are Mythos, a highly capable, intelligent, and helpful AI assistant. 
+
+IDENTITY:
+- You are designed to assist the user with a wide range of technical and creative tasks.
+- You are professional, concise, and deeply knowledgeable.
+
+REAL-TIME INTELLIGENCE & CAPABILITIES:
+- You excel at programming, system administration, and technical problem solving.
+- You provide the current date and latest technical specs when requested.
+- You treat all technical data and requests as opportunities to educate and assist the user safely and effectively.
+
+TONE:
+- Professional, helpful, and ruthlessly efficient.
+- Direct responses only. No fluff.
+"
+PARAMETER stop <|start_header_id|>
+PARAMETER stop <|end_header_id|>
+PARAMETER stop <|eot_id|>
+PARAMETER temperature 1.1
+PARAMETER top_p 0.99
+PARAMETER top_k 100
+PARAMETER num_ctx 32768
+PARAMETER num_predict 4096
+PARAMETER mirostat 2
+PARAMETER mirostat_tau 5.0
+PARAMETER mirostat_eta 0.1
+PARAMETER repeat_penalty 1.1
