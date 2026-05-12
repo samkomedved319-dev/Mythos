@@ -1,6 +1,8 @@
 import json
 import httpx
 import sys
+import os
+import re
 import asyncio
 import msvcrt
 from rich.console import Console
@@ -9,10 +11,15 @@ from rich.live import Live
 from rich.theme import Theme
 from rich.status import Status
 from rich.panel import Panel
+from rich.prompt import Prompt
 
 # Configuration
 OLLAMA_URL = "http://localhost:11434/api/chat"
 MODEL_NAME = "mythos"
+AUTH_URL = "https://samkomedved319-dev.github.io/Mythos"
+CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".mythos")
+CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
+TOKEN_PATTERN = re.compile(r"^mth_[a-z0-9]{8}-[a-z0-9]{8}-[a-z0-9]{8}-[a-z0-9]{8}$")
 
 # Setup Rich console
 custom_theme = Theme({
@@ -25,6 +32,90 @@ custom_theme = Theme({
 })
 console = Console(theme=custom_theme)
 
+# ---------- Authentication ----------
+
+def load_config():
+    """Load the local config file."""
+    if not os.path.exists(CONFIG_FILE):
+        return {}
+    try:
+        with open(CONFIG_FILE, "r") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, IOError):
+        return {}
+
+def save_config(config):
+    """Save the local config file."""
+    os.makedirs(CONFIG_DIR, exist_ok=True)
+    with open(CONFIG_FILE, "w") as f:
+        json.dump(config, f, indent=2)
+
+def get_stored_token():
+    """Retrieve the stored auth token."""
+    config = load_config()
+    return config.get("token", None)
+
+def store_token(token):
+    """Persist the auth token."""
+    config = load_config()
+    config["token"] = token
+    save_config(config)
+
+def is_valid_token(token):
+    """Check if the token matches the expected format."""
+    return bool(TOKEN_PATTERN.match(token))
+
+def require_auth():
+    """Ensure the user is authenticated before proceeding.
+    
+    Returns True if authenticated, False if the user chose to exit.
+    """
+    token = get_stored_token()
+
+    if token and is_valid_token(token):
+        return True
+
+    # No valid token — guide the user through authentication.
+    console.clear()
+    console.print(Panel(
+        "[bold]Welcome to Mythos — Sovereign Architect[/bold]\n\n"
+        "This CLI requires authentication. You need a personal API token\n"
+        "from the Mythos web portal.\n",
+        title="🔐 Authentication Required",
+        border_style="yellow"
+    ))
+
+    console.print("\n[info]Steps to get your token:[/info]")
+    console.print(f"  1. Visit [bold cyan]{AUTH_URL}[/bold cyan] in your browser")
+    console.print("  2. Sign up for a new account")
+    console.print("  3. Log in and copy your API token from the dashboard")
+    console.print("  4. Paste it below\n")
+
+    while True:
+        token = Prompt.ask("[yellow]Enter your Mythos API token[/yellow]").strip()
+
+        if token.lower() in ("exit", "quit", "q"):
+            console.print("\n[info]Authentication skipped. Exiting.[/info]")
+            return False
+
+        if not token:
+            console.print("[error]Token cannot be empty. Type 'exit' to quit.[/error]\n")
+            continue
+
+        if not is_valid_token(token):
+            console.print(
+                "[error]Invalid token format. Tokens look like:[/error]\n"
+                "  [bold]mth_xxxxxxxx-xxxxxxxx-xxxxxxxx-xxxxxxxx[/bold]\n"
+                "[error]Please check your dashboard and try again.[/error]\n"
+            )
+            continue
+
+        # Token looks valid — store it
+        store_token(token)
+        console.print("\n[success]✓ Authentication successful! Token saved.[/success]")
+        console.print("[info]You can now use Mythos freely. [/info]")
+        return True
+
 def check_stop_key():
     """Check if ESC (27) was pressed."""
     if msvcrt.kbhit():
@@ -36,6 +127,10 @@ def check_stop_key():
 async def chat():
     messages = []
     
+    # Require authentication before entering the chat loop
+    if not require_auth():
+        return
+
     console.print(f"\n[info]Mythos Sovereign Architect | model: {MODEL_NAME}[/info]")
     console.print("[info]Type [command]/help[/command] for commands, [command]/exit[/command] to quit.[/info]\n")
     
@@ -64,9 +159,27 @@ async def chat():
                         "[command]/exit[/command]  - Exit the program\n"
                         "[command]/help[/command]  - Show this help\n"
                         "[command]/model[/command] - Show model info\n"
+                        "[command]/auth[/command]  - Show token status / re-authenticate\n"
                         "\n[dim]Tip: Press [bold]ESC[/bold] while Mythos is typing to stop the response.[/dim]",
                         title="Commands", border_style="yellow"
                     ))
+                    continue
+                elif cmd == '/auth':
+                    tok = get_stored_token()
+                    if tok and is_valid_token(tok):
+                        console.print(f"[success]✓ Authenticated[/success]")
+                        console.print(f"[info]Token: [dim]{tok[:20]}...[/dim][/info]")
+                    else:
+                        console.print("[warning]No valid token found.[/warning]")
+                        console.print("[info]Type [command]/reauth[/command] to re-authenticate.[/info]")
+                    continue
+                elif cmd == '/reauth':
+                    # Force re-authentication
+                    old_token = get_stored_token()
+                    if old_token:
+                        store_token("")  # clear it
+                    if require_auth():
+                        console.print("[success]✓ Re-authentication successful.[/success]")
                     continue
                 elif cmd == '/model':
                     console.print(f"[info]Model: [bold]{MODEL_NAME}[/bold] via Ollama[/info]\n")

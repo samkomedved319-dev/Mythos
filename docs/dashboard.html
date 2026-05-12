@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dashboard — Mythos</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='28' font-size='28'>🏛️</text></svg>" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body data-page="dashboard">
+
+  <!-- Navbar -->
+  <nav class="navbar">
+    <div class="container">
+      <a href="index.html" class="navbar-brand"><span>M</span>ythos</a>
+      <div class="navbar-links" id="nav-right">
+        <a href="dashboard.html">Dashboard</a>
+        <a href="#" id="nav-logout" style="color: var(--text-muted);">Logout</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Dashboard -->
+  <div class="dashboard-page">
+    <div class="container">
+      <div class="dashboard-header">
+        <div>
+          <h1>Welcome, <span id="dashboard-name">—</span></h1>
+          <p style="color: var(--text-secondary); font-size: 0.9rem;">Your Mythos sovereign command center.</p>
+        </div>
+        <a href="#" id="dashboard-logout" class="btn btn-ghost btn-sm">Logout</a>
+      </div>
+
+      <div class="dashboard-grid">
+        <!-- API Token -->
+        <div class="card">
+          <h3 style="margin-bottom: 4px;">🔑 Your API Token</h3>
+          <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 8px;">
+            Use this token to authenticate the Mythos CLI on any machine.
+          </p>
+          <div class="token-display">
+            <span class="token-value" id="dashboard-token">—</span>
+            <button class="copy-btn" id="token-copy">Copy</button>
+          </div>
+        </div>
+
+        <!-- Setup Instructions -->
+        <div class="card">
+          <h3 style="margin-bottom: 4px;">🚀 CLI Setup</h3>
+          <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 12px;">
+            Follow these steps to start using Mythos in your terminal.
+          </p>
+          <div class="setup-steps">
+            <div class="setup-step">
+              <span class="step-num">1</span>
+              <span class="step-text">
+                Install <a href="https://ollama.com/" target="_blank">Ollama</a> and
+                <a href="https://www.python.org/downloads/" target="_blank">Python 3.10+</a>
+              </span>
+            </div>
+            <div class="setup-step">
+              <span class="step-num">2</span>
+              <span class="step-text">
+                Clone the repository:
+                <br /><code>git clone https://github.com/samkomedved319-dev/Mythos.git</code>
+              </span>
+            </div>
+            <div class="setup-step">
+              <span class="step-num">3</span>
+              <span class="step-text">
+                Install dependencies:
+                <br /><code>pip install -r requirements.txt</code>
+              </span>
+            </div>
+            <div class="setup-step">
+              <span class="step-num">4</span>
+              <span class="step-text">
+                Run and authenticate:
+                <br /><code>python mythos_cli.py</code>
+                <br />Paste your token when prompted.
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Account Info -->
+        <div class="card">
+          <h3 style="margin-bottom: 4px;">👤 Account</h3>
+          <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 12px;">
+            Your account details.
+          </p>
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border);">
+              <span style="color: var(--text-secondary); font-size: 0.85rem;">Name</span>
+              <span id="dashboard-name-display" style="font-size: 0.9rem;">—</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border);">
+              <span style="color: var(--text-secondary); font-size: 0.85rem;">Status</span>
+              <span style="font-size: 0.9rem; color: var(--success);">Active</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Quick Links -->
+        <div class="card">
+          <h3 style="margin-bottom: 4px;">📚 Resources</h3>
+          <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 12px;">
+            Helpful links to get the most out of Mythos.
+          </p>
+          <div style="display: flex; flex-direction: column; gap: 10px;">
+            <a href="https://github.com/samkomedved319-dev/Mythos" target="_blank" style="font-size: 0.9rem;">📦 GitHub Repository</a>
+            <a href="https://ollama.com/" target="_blank" style="font-size: 0.9rem;">🤖 Ollama</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer class="footer">
+    <div class="container">
+      <p>Mythos — Sovereign Architect &middot; Authenticated session</p>
+    </div>
+  </footer>
+
+  <script src="js/auth.js"></script>
+  <script>
+    // Extra: populate name display on dashboard
+    document.addEventListener('DOMContentLoaded', function () {
+      const user = (function() {
+        try {
+          const s = JSON.parse(localStorage.getItem('mythos_session'));
+          if (s && s.email) {
+            const users = JSON.parse(localStorage.getItem('mythos_users')) || {};
+            return users[s.email] || null;
+          }
+        } catch(e) {}
+        return null;
+      })();
+      if (user) {
+        const el = document.getElementById('dashboard-name-display');
+        if (el) el.textContent = user.name;
+      }
+    });
+  </script>
+</body>
+</html>
