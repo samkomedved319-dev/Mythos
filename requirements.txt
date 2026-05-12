@@ -1,2 +1,5 @@
 rich
 httpx
+duckduckgo-search
+beautifulsoup4
+lxml
