@@ -1,7 +1,9 @@
+import os
+import sys
+os.environ["NO_COLOR"] = "1"  # Must be set before Rich imports
+
 import json
 import httpx
-import sys
-import os
 import re
 import asyncio
 import socket
@@ -19,11 +21,6 @@ from rich.panel import Panel
 from rich.prompt import Prompt
 from rich.table import Table
 from rich import box
-from rich.text import Text
-from rich.align import Align
-from rich.syntax import Syntax
-from rich.columns import Columns
-from rich.layout import Layout
 
 # ---------------------------------------------------------------------------
 #  CONFIG
@@ -65,10 +62,23 @@ custom_theme = Theme({
     "dim":        "dim white",
     "accent":     "bold cyan",
 })
-# Disable colors in non-interactive shells or when TERM is not set (Windows PowerShell fix)
+# Force "standard" (8-color ANSI) on Windows for maximum compatibility.
+# Rich 15+ uses color_system="auto" which emits PowerShell macro sequences
+# ("\e[?87654l" etc.) that cmd.exe / PowerShell interpret as terminal macros.
+# We also force color_system=None on Windows console hosts (cmd.exe, PowerShell)
+# to completely suppress any escape sequences that could trigger "Invalid macro".
 _no_color = os.environ.get("NO_COLOR") or not sys.stdout.isatty()
-_color_system = None if _no_color else "auto"
-console = Console(theme=custom_theme, safe_box=True, legacy_windows=bool(os.name == "nt"), color_system=_color_system)
+if _no_color:
+    _color_system = None
+elif os.name == "nt":
+    # On Windows, check if we're in a console host (cmd.exe / PowerShell)
+    # that can't handle Rich's ANSI sequences. Force no colors there.
+    try:
+        _color_system = None  # Safe default: no ANSI escape sequences at all
+    except Exception:
+        _color_system = "standard"
+else:
+    _color_system = "auto"
 
 # ---------------------------------------------------------------------------
 #  TOOL CALL RENDERING  (Claude Code style -- ">" prefix, clean separator)
@@ -853,12 +863,10 @@ async def chat():
             # Send to AI model
             messages.append({"role": "user", "content": user_input})
             full_response = ""
-            tool_header("think")
-
-            payload = {"model": MODEL_NAME, "messages": messages, "stream": True}
             while msvcrt.kbhit(): msvcrt.getch()
 
-            console.print("  [dim]Thinking...[/dim]")
+            payload = {"model": MODEL_NAME, "messages": messages, "stream": True}
+            console.print()
             try:
                 async with httpx.AsyncClient() as client:
                     async with client.stream("POST", OLLAMA_URL, json=payload, timeout=None) as resp:
