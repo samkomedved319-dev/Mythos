@@ -80,6 +80,8 @@ elif os.name == "nt":
 else:
     _color_system = "auto"
 
+console = Console(theme=custom_theme, safe_box=True, legacy_windows=bool(os.name == "nt"), color_system=_color_system)
+
 # ---------------------------------------------------------------------------
 #  TOOL CALL RENDERING  (Claude Code style -- ">" prefix, clean separator)
 # ---------------------------------------------------------------------------
