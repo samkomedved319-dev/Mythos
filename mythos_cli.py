@@ -4,7 +4,14 @@ import sys
 import os
 import re
 import asyncio
+import socket
+import ssl
+import datetime
+import ipaddress
 import msvcrt
+import subprocess
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from urllib.parse import urlparse
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.live import Live
@@ -16,10 +23,13 @@ from rich.table import Table
 from rich import box
 from rich.text import Text
 from rich.align import Align
+from rich.syntax import Syntax
+from rich.columns import Columns
+from rich.layout import Layout
 
-# --------------------------------------------------------------------------------------------
-#  CONFIGURATION
-# --------------------------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+#  CONFIG
+# ---------------------------------------------------------------------------
 
 OLLAMA_URL = "http://localhost:11434/api/chat"
 MODEL_NAME = "mythos"
@@ -29,25 +39,74 @@ CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
 TOKEN_PATTERN = re.compile(r"^mth_[a-z0-9]{8}-[a-z0-9]{8}-[a-z0-9]{8}-[a-z0-9]{8}$")
 ADMIN_EMAIL = "samkomedved319@gmail.com"
 
-# --------------------------------------------------------------------------------------------
-#  RICH THEME
-# --------------------------------------------------------------------------------------------
+# Common ports for /scan
+COMMON_PORTS = {
+    21:"FTP",22:"SSH",23:"Telnet",25:"SMTP",53:"DNS",80:"HTTP",
+    110:"POP3",111:"RPC",135:"RPC",139:"NetBIOS",143:"IMAP",
+    443:"HTTPS",445:"SMB",993:"IMAPS",995:"POP3S",
+    1433:"MSSQL",1521:"Oracle",2049:"NFS",3306:"MySQL",
+    3389:"RDP",5432:"PostgreSQL",5900:"VNC",5985:"WinRM",
+    5986:"WinRMS",6379:"Redis",8080:"HTTP-Alt",8443:"HTTPS-Alt",
+    9000:"WebApp",9090:"WebApp",27017:"MongoDB"
+}
+
+# ---------------------------------------------------------------------------
+#  RICH THEME  (Claude Code inspired -- clean, minimal, high contrast)
+# ---------------------------------------------------------------------------
 
 custom_theme = Theme({
-    "info": "dim cyan",
-    "user": "bold green",
-    "assistant": "bold magenta",
-    "prompt": "bold white",
-    "error": "bold red",
-    "command": "bold yellow",
-    "success": "bold green",
-    "warning": "bold yellow",
+    "meta":       "dim white",
+    "user":       "bold green",
+    "assistant":  "bold cyan",
+    "prompt":     "bold white",
+    "cmd":        "bold yellow",
+    "error":      "bold red",
+    "success":    "bold green",
+    "warning":    "bold yellow",
+    "info":       "dim cyan",
+    "dim":        "dim white",
+    "accent":     "bold cyan",
 })
 console = Console(theme=custom_theme)
 
-# --------------------------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+#  TOOL CALL RENDERING  (Claude Code style -- ">" prefix, clean separator)
+# ---------------------------------------------------------------------------
+
+def tool_header(name, target=""):
+    """Render a Claude Code-style tool call header."""
+    label = name.upper()
+    if target:
+        console.print(f"  [dim]>[/dim] [accent]{label}[/accent] [dim]{target}[/dim]")
+    else:
+        console.print(f"  [dim]>[/dim] [accent]{label}[/accent]")
+
+def tool_result(content):
+    """Render tool result content indented."""
+    for line in content.strip().split("\n"):
+        console.print(f"  [dim]|[/dim] {line}")
+
+def tool_error(msg):
+    console.print(f"  [dim]>[/dim] [error]! {msg}[/error]")
+
+def tool_table(title, columns, rows, style="cyan"):
+    """Render a table as a tool result."""
+    t = Table(title=title, border_style=style, box=box.ROUNDED, title_justify="left")
+    for col in columns:
+        t.add_column(col[0], style=col[1] if len(col) > 1 else "", no_wrap=col[2] if len(col) > 2 else False)
+    for row in rows:
+        t.add_row(*row)
+    console.print(t)
+
+# Status badge: short, one-line session header
+def render_status(email, role, messages_len):
+    r = "o" if role == "admin" else "o"
+    role_tag = f" {r} Admin" if role == "admin" else ""
+    return f"[dim]{email}{role_tag}[/dim] [dim]|[/dim] [accent]{MODEL_NAME}[/accent] [dim]| msgs: {messages_len}[/dim]"
+
+# ---------------------------------------------------------------------------
 #  CONFIG / CREDENTIALS
-# --------------------------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 
 def load_config():
     if not os.path.exists(CONFIG_FILE):
@@ -90,356 +149,712 @@ def is_admin_email(email):
 def get_user_role(email):
     return "admin" if is_admin_email(email) else "user"
 
-# --------------------------------------------------------------------------------------------
-#  AUTH  SIMPLE, RELIABLE, MANUAL
-# --------------------------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+#  AUTH
+# ---------------------------------------------------------------------------
 
 def require_auth():
-    """Gate: check stored credentials; if missing, prompt user to
-    visit the website, sign up, and paste email + token."""
-
     email = get_stored_email()
     token = get_stored_token()
-
     if email and token and is_valid_token(token):
-        return True  # already authenticated
+        return True
 
-    # ---- Auth screen ----
     console.clear()
     console.print()
     console.print(Panel(
-        "[bold]Welcome to Mythos  Sovereign Architect[/bold]\n\n"
+        "[bold]Welcome to Mythos -- Sovereign Architect[/bold]\n\n"
         "This CLI requires authentication.\n\n"
-        f"  Open this link in your browser:\n"
-        f"    [bold cyan underline]{AUTH_URL}[/bold cyan underline]\n\n"
-        "  Sign up or log in\n"
-        "  Copy your [bold]email[/bold] and [bold]API token[/bold] from the Dashboard\n"
-        "  Paste them below\n\n"
-        "It takes 30 seconds.",
-        title=" Authentication Required",
+        f"  [accent]>[/accent] Open: [bold cyan underline]{AUTH_URL}[/bold cyan underline]\n"
+        "  [accent]>[/accent] Sign up or log in\n"
+        "  [accent]>[/accent] Copy your email + token from Dashboard\n"
+        "  [accent]>[/accent] Paste them below\n",
+        title="Authentication Required",
         border_style="yellow",
     ))
     console.print()
 
     while True:
-        email_input = Prompt.ask("[yellow]Your email[/yellow]").strip().lower()
-
-        if email_input.lower() in ("exit", "quit", "q", ""):
-            console.print("\n[info]Authentication skipped. Exiting.[/info]")
+        ei = Prompt.ask("[yellow]Your email[/yellow]").strip().lower()
+        if ei.lower() in ("exit", "quit", "q", ""):
+            console.print("\n[info]Exiting.[/info]")
             return False
-
-        if "@" not in email_input or "." not in email_input:
-            console.print("[error]Please enter a valid email address.[/error]\n")
+        if "@" not in ei or "." not in ei:
+            console.print("[error]Valid email required.[/error]\n")
             continue
-
-        # email looks OK  ask for token
         break
 
     while True:
-        token_input = Prompt.ask("[yellow]Your API token[/yellow]").strip()
-
-        if token_input.lower() in ("exit", "quit", "q"):
-            console.print("\n[info]Authentication skipped. Exiting.[/info]")
+        ti = Prompt.ask("[yellow]Your API token[/yellow]").strip()
+        if ti.lower() in ("exit", "quit", "q"):
+            console.print("\n[info]Exiting.[/info]")
             return False
-
-        if not token_input:
+        if not ti:
             console.print("[error]Token cannot be empty.[/error]\n")
             continue
-
-        if not is_valid_token(token_input):
-            console.print(
-                "[error]Wrong format. Tokens look like:[/error]\n"
-                f"  [bold]mth_xxxxxxxx-xxxxxxxx-xxxxxxxx-xxxxxxxx[/bold]\n"
-                f"[info]Get yours at {AUTH_URL}/dashboard.html[/info]\n"
-            )
+        if not is_valid_token(ti):
+            console.print("[error]Invalid format. Expected: mth_xxxx-xxxx-xxxx-xxxx[/error]\n")
             continue
-
-        # Valid token
         break
 
-    # Store & confirm
-    role = get_user_role(email_input)
-    store_credentials(email_input, token_input)
-
+    role = get_user_role(ei)
+    store_credentials(ei, ti)
     console.print()
     if role == "admin":
-        console.print("[success]  Authenticated as Mythos Admin / Owner[/success]")
+        console.print("[success]  Authenticated as Mythos Admin[/success]")
     else:
-        console.print("[success] Authentication successful![/success]")
-    console.print("[info]Type [command]/help[/command] to see available commands.[/info]\n")
+        console.print("[success]  Authenticated[/success]")
+    console.print("[info]Type /help for commands.[/info]\n")
     return True
 
+# ---------------------------------------------------------------------------
+#  WEB / NETWORK TOOLS
+# ---------------------------------------------------------------------------
 
-# --------------------------------------------------------------------------------------------
-#  CHAT LOOP
-# --------------------------------------------------------------------------------------------
+def web_search(query, max_results=5):
+    try:
+        from duckduckgo_search import DDGS
+        results = []
+        with DDGS() as ddgs:
+            for r in ddgs.text(query, max_results=max_results):
+                results.append({"title": r.get("title",""), "href": r.get("href",""), "body": r.get("body","")})
+        return results
+    except Exception as e:
+        return {"error": str(e)}
+
+def fetch_page(url, timeout=10):
+    try:
+        if not url.startswith(("http://","https://")):
+            url = "https://" + url
+        r = httpx.get(url, timeout=timeout, follow_redirects=True)
+        text = r.text
+        if len(text) > 5000:
+            text = text[:5000] + f"\n\n[dim]... truncated ({len(r.text)} bytes total)[/dim]"
+        return {"status": r.status_code, "headers": dict(r.headers), "content": text, "url": str(r.url)}
+    except Exception as e:
+        return {"error": str(e)}
+
+def scan_ports(host, ports=None, timeout=1.5):
+    if ports is None:
+        ports = list(COMMON_PORTS.keys())
+    host = re.sub(r'^https?://', '', host).split('/')[0].split(':')[0]
+    open_ports = []
+    def check(port):
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(timeout)
+            r = s.connect_ex((host, port))
+            s.close()
+            return port if r == 0 else None
+        except:
+            return None
+    with ThreadPoolExecutor(max_workers=50) as ex:
+        for f in as_completed([ex.submit(check, p) for p in ports]):
+            r = f.result()
+            if r: open_ports.append(r)
+    open_ports.sort()
+    return open_ports
+
+def dns_lookup(domain):
+    domain = re.sub(r'^https?://', '', domain).split('/')[0].split(':')[0]
+    r = {}
+    try:
+        r["A (IPv4)"] = list(set(info[4][0] for info in socket.getaddrinfo(domain, 80, socket.AF_INET)))
+    except: r["A (IPv4)"] = ["[error]No record[/error]"]
+    try:
+        r["AAAA (IPv6)"] = list(set(info[4][0] for info in socket.getaddrinfo(domain, 80, socket.AF_INET6)))
+    except: r["AAAA (IPv6)"] = ["[error]No record[/error]"]
+    return r
+
+def http_headers(url, timeout=10):
+    try:
+        if not url.startswith(("http://","https://")):
+            url = "https://" + url
+        r = httpx.head(url, timeout=timeout, follow_redirects=True)
+        h = dict(r.headers)
+        return {
+            "Status": r.status_code,
+            "Server": h.get("server","N/A"),
+            "Powered By": h.get("x-powered-by","N/A"),
+            "HSTS": "Yes" if "strict-transport-security" in h else "No",
+            "XSS Protection": h.get("x-xss-protection","N/A"),
+            "Content-Type Options": h.get("x-content-type-options","N/A"),
+            "Frame Options": h.get("x-frame-options","N/A"),
+            "CSP": "Yes" if "content-security-policy" in h else "No",
+            "CORS": h.get("access-control-allow-origin","N/A"),
+            "Final URL": str(r.url),
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+def resolve_ip(host):
+    host = re.sub(r'^https?://', '', host).split('/')[0].split(':')[0]
+    try:
+        ips = set()
+        try:
+            for info in socket.getaddrinfo(host, 80):
+                ips.add(info[4][0])
+        except: pass
+        if ips: return {"host": host, "ips": list(ips)}
+        ip = socket.gethostbyname(host)
+        return {"host": host, "ips": [ip]}
+    except Exception as e:
+        return {"error": str(e), "host": host}
+
+# ---------------------------------------------------------------------------
+#  SECURITY AUDIT TOOLS  (legitimate security assessment)
+# ---------------------------------------------------------------------------
+
+def ssl_check(host, port=443, timeout=5):
+    """Check SSL certificate details for a host."""
+    host = re.sub(r'^https?://', '', host).split('/')[0].split(':')[0]
+    try:
+        ctx = ssl.create_default_context()
+        with socket.create_connection((host, port), timeout=timeout) as sock:
+            with ctx.wrap_socket(sock, server_hostname=host) as ssock:
+                cert = ssock.getpeercert()
+                return {
+                    "host": host,
+                    "port": port,
+                    "subject": dict(cert.get("subject", [])[0]) if cert.get("subject") else {},
+                    "issuer": dict(cert.get("issuer", [])[0]) if cert.get("issuer") else {},
+                    "version": cert.get("version", ""),
+                    "serial": cert.get("serialNumber", ""),
+                    "not_before": cert.get("notBefore", ""),
+                    "not_after": cert.get("notAfter", ""),
+                    "sans": [entry for d in cert.get("subjectAltName", []) for entry in d if entry],
+                    "cipher": ssock.cipher(),
+                    "ocsp": cert.get("OCSP", "N/A"),
+                    "ca_issuers": cert.get("caIssuers", "N/A"),
+                }
+    except Exception as e:
+        return {"error": str(e), "host": host}
+
+def whois_lookup(domain, timeout=10):
+    """Perform WHOIS lookup using system command or public API."""
+    domain = re.sub(r'^https?://', '', domain).split('/')[0].split(':')[0]
+    try:
+        # Try using httpx to query a free WHOIS API
+        r = httpx.get(f"https://whois.freeaiapi.com/?domain={domain}", timeout=timeout)
+        if r.status_code == 200:
+            data = r.json()
+            return data
+    except: pass
+    try:
+        # Fallback: try system whois command
+        result = subprocess.run(["whois", domain], capture_output=True, text=True, timeout=timeout)
+        if result.returncode == 0 and result.stdout.strip():
+            lines = result.stdout.split("\n")[:30]
+            return {"raw": "\n".join(lines) + "\n[dim]... truncated[/dim]"}
+    except: pass
+    return {"error": "WHOIS lookup failed"}
+
+def subdomain_enum(domain, timeout=8):
+    """Check common subdomains via DNS resolution."""
+    domain = re.sub(r'^https?://', '', domain).split('/')[0].split(':')[0]
+    common = ["www", "mail", "ftp", "admin", "blog", "shop", "api", "cdn",
+              "webmail", "vpn", "remote", "portal", "dev", "test", "stage",
+              "beta", "app", "m", "status", "help", "support", "forum",
+              "wiki", "docs", "download", "cloud", "auth", "login", "sso",
+              "git", "jenkins", "jira", "confluence", "wiki", "kb"]
+    found = []
+    def check(sub):
+        try:
+            full = f"{sub}.{domain}"
+            ip = socket.gethostbyname(full)
+            return (sub, ip)
+        except:
+            return None
+    with ThreadPoolExecutor(max_workers=15) as ex:
+        for f in as_completed([ex.submit(check, s) for s in common]):
+            r = f.result()
+            if r: found.append(r)
+    found.sort(key=lambda x: x[0])
+    return found
+
+def banner_grab(host, port, timeout=3):
+    """Grab a service banner from an open port."""
+    host = re.sub(r'^https?://', '', host).split('/')[0].split(':')[0]
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(timeout)
+        s.connect((host, port))
+        # Send generic probe for common services
+        if port in (80, 8080, 443, 8443):
+            s.send(b"GET / HTTP/1.0\r\nHost: " + host.encode() + b"\r\n\r\n")
+        elif port in (21,):
+            pass  # FTP sends banner on connect
+        elif port in (22,):
+            pass  # SSH sends banner on connect
+        else:
+            s.send(b"\r\n")
+        try:
+            banner = s.recv(1024).decode("utf-8", errors="replace").strip()
+        except:
+            banner = ""
+        s.close()
+        # Clean up
+        lines = banner.split("\n")
+        cleaned = [l.strip() for l in lines if l.strip()][:5]
+        return {"port": port, "service": COMMON_PORTS.get(port, "Unknown"), "banner": "\n".join(cleaned) if cleaned else "No banner"}
+    except Exception as e:
+        return {"port": port, "service": COMMON_PORTS.get(port, "Unknown"), "error": str(e)}
+
+# ---------------------------------------------------------------------------
+#  UTILITY
+# ---------------------------------------------------------------------------
 
 def check_stop_key():
     if msvcrt.kbhit():
-        key = msvcrt.getch()
-        if ord(key) == 27:
+        if ord(msvcrt.getch()) == 27:
             return True
     return False
 
+def check_ollama():
+    try:
+        r = httpx.get("http://localhost:11434/api/tags", timeout=2)
+        return r.status_code == 200
+    except:
+        return False
+
+# ---------------------------------------------------------------------------
+#  MAIN CHAT LOOP
+# ---------------------------------------------------------------------------
 
 async def chat():
     messages = []
 
-    # ---- Auth gate ----
     if not require_auth():
         return
 
     email = get_stored_email()
     role  = get_user_role(email)
-    role_tag = "  Admin" if role == "admin" else ""
 
-    console.print(f"[info]Mythos Sovereign Architect | model: {MODEL_NAME} | {email}{role_tag}[/info]")
-    console.print("[info]Type [command]/help[/command] for commands, [command]/exit[/command] to quit.[/info]\n")
+    console.clear()
+    console.print("  " + "-" * 50)
+    console.print(f"  [accent]Mythos[/accent] [dim]| {email} [/dim]" + ("[warning] Admin[/warning]" if role == "admin" else "") + f" [dim]| model: {MODEL_NAME}[/dim]")
+    console.print(f"  [dim]Type /help for commands, /exit to quit[/dim]")
+    console.print("  " + "-" * 50)
 
     while True:
         try:
-            user_input = console.input("[user]You[/user] [prompt][/prompt] ").strip()
+            # -- Claude Code-style prompt --
+            user_input = console.input("  [dim]>[/dim] ").strip()
 
             if not user_input:
                 continue
 
-            # ---- Slash commands ----
-            if user_input.startswith('/'):
-                cmd = user_input.lower().split()[0]
+            # -- Parse command --
+            cmd = user_input.lower().split()[0]
+            args = user_input[len(cmd):].strip()
+            is_cmd = user_input.startswith('/')
 
-                # /exit /quit
+            # =========================== SYSTEM COMMANDS ===========================
+
+            if is_cmd:
                 if cmd in ('/exit', '/quit'):
-                    console.print("\n[info]Farewell.[/info]")
+                    console.print("\n  [info]Farewell.[/info]")
                     break
 
-                # /clear
                 elif cmd == '/clear':
                     messages = []
                     console.clear()
-                    console.print("[info]Memory cleared. Mythos is ready again.[/info]\n")
+                    console.print("  " + "-" * 50)
+                    console.print(f"  [accent]Mythos[/accent] [dim]| {email}[/dim]" + ("[warning] Admin[/warning]" if role == "admin" else "") + f" [dim]| model: {MODEL_NAME}[/dim]")
+                    console.print("  " + "-" * 50)
                     continue
 
-                # /help
                 elif cmd == '/help':
-                    cmds = [
-                        ("/clear",   "Clear chat history"),
-                        ("/exit",    "Exit the program"),
-                        ("/help",    "Show this help"),
-                        ("/model",   "Show AI model info"),
-                        ("/auth",    "Show authentication status"),
-                        ("/whoami",  "Show your account details"),
-                        ("/session", "Show full session information"),
-                        ("/status",  "Show system health"),
-                        ("/doctor",  "Run diagnostic checks"),
-                        ("/config",  "Show config file info"),
-                        ("/reauth",  "Re-authenticate with new credentials"),
-                        ("/logout",  "Clear stored credentials and exit"),
+                    console.print()
+                    tool_header("help", "all commands")
+                    console.print("  [dim]System[/dim]")
+                    sys_cmds = [
+                        ("/auth", "Show auth status"),
+                        ("/whoami", "Your account details"),
+                        ("/session", "Session info"),
+                        ("/status", "System health"),
+                        ("/doctor", "Full diagnostics"),
+                        ("/config", "Config location"),
+                        ("/model", "AI model info"),
+                        ("/reauth", "Re-authenticate"),
+                        ("/logout", "Clear credentials & exit"),
+                        ("/clear", "Clear chat"),
+                        ("/exit", "Quit"),
                     ]
                     if role == "admin":
-                        cmds.append(("/admin", "Admin console (owner only)"))
-
-                    table = Table(title="Commands", border_style="yellow", box=box.ROUNDED, title_justify="left")
-                    table.add_column("Command", style="bold yellow", no_wrap=True)
-                    table.add_column("Description", style="dim")
-                    for c, d in cmds:
-                        table.add_row(c, d)
-                    console.print(table)
-                    console.print("\n[dim]Tip: Press [bold]ESC[/bold] to stop a response mid-stream.[/dim]")
+                        sys_cmds.insert(0, ("/admin", "Admin console"))
+                    for c, d in sys_cmds:
+                        console.print(f"    [cmd]{c:12}[/cmd] [dim]{d}[/dim]")
+                    console.print("  [dim]Web / Network[/dim]")
+                    web_cmds = [
+                        ("/search <q>", "Search web via DuckDuckGo"),
+                        ("/fetch <url>", "Fetch web page content"),
+                        ("/http <url>", "HTTP headers & security"),
+                        ("/scan <host>", "TCP port scan"),
+                        ("/dns <domain>", "DNS resolution"),
+                        ("/ip [host]", "Resolve IP / show public IP"),
+                    ]
+                    for c, d in web_cmds:
+                        console.print(f"    [cmd]{c:15}[/cmd] [dim]{d}[/dim]")
+                    console.print("  [dim]Security Audit[/dim]")
+                    sec_cmds = [
+                        ("/ssl <host>", "SSL certificate check"),
+                        ("/whois <domain>", "WHOIS domain lookup"),
+                        ("/subdomains <d>", "Find common subdomains"),
+                        ("/banner <h> <p>", "Grab service banner"),
+                    ]
+                    for c, d in sec_cmds:
+                        console.print(f"    [cmd]{c:15}[/cmd] [dim]{d}[/dim]")
+                    console.print()
                     continue
 
-                # /auth
                 elif cmd == '/auth':
                     tok = get_stored_token()
                     em = get_stored_email()
                     if em and tok and is_valid_token(tok):
                         r = get_user_role(em)
-                        icon = " " if r == "admin" else ""
-                        console.print(f"[success]{icon} Authenticated[/success]")
-                        console.print(f"  Email: [bold]{em}[/bold]")
-                        console.print(f"  Token: [dim]{tok[:20]}...[/dim]")
-                        console.print(f"  Role:  [bold]{r}[/bold]")
+                        tool_header("auth", em)
+                        console.print(f"  [dim]|[/dim]  Status: [success]Authenticated[/success]")
+                        console.print(f"  [dim]|[/dim]  Role:   [accent]{r.upper()}[/accent]")
+                        console.print(f"  [dim]|[/dim]  Token:  [dim]{tok[:20]}...[/dim]")
                     else:
-                        console.print("[warning]Not authenticated.[/warning]")
-                        console.print("[info]Type [command]/reauth[/command] to log in.[/info]")
+                        tool_error("Not authenticated. Use /reauth")
                     continue
 
-                # /whoami
                 elif cmd == '/whoami':
                     em = get_stored_email()
                     tok = get_stored_token()
                     if em:
                         r = get_user_role(em)
-                        icon = " " if r == "admin" else ""
-                        t = Table(title=f"{icon}Account Details", border_style="cyan", box=box.ROUNDED)
-                        t.add_column("Field", style="bold cyan")
-                        t.add_column("Value")
-                        t.add_row("Email", em)
-                        t.add_row("Role", r.upper())
-                        t.add_row("Authenticated", " Yes" if tok and is_valid_token(tok) else " No")
-                        t.add_row("Config", CONFIG_FILE)
-                        console.print(t)
-                    else:
-                        console.print("[warning]No account. Type /reauth to log in.[/warning]")
+                        tool_header("whoami")
+                        tool_result(f"Email:   {em}")
+                        tool_result(f"Role:    {r.upper()}")
+                        tool_result(f"Auth:    {'Yes' if tok and is_valid_token(tok) else 'No'}")
+                        tool_result(f"Config:  {CONFIG_FILE}")
                     continue
 
-                # /session
                 elif cmd == '/session':
                     em = get_stored_email()
                     tok = get_stored_token()
-                    r = get_user_role(em) if em else ""
-                    icon = " " if r == "admin" else ""
-                    t = Table(title=f"{icon}Session", border_style="cyan", box=box.ROUNDED)
-                    t.add_column("Property", style="bold cyan")
-                    t.add_column("Value")
-                    t.add_row("User", em or "")
-                    t.add_row("Role", r.upper())
-                    t.add_row("Auth", " Active" if em and tok and is_valid_token(tok) else " Inactive")
-                    t.add_row("Model", MODEL_NAME)
-                    t.add_row("Ollama", OLLAMA_URL)
-                    t.add_row("Portal", AUTH_URL)
-                    t.add_row("Config", CONFIG_DIR)
-                    t.add_row("Messages", str(len(messages)))
-                    console.print(t)
+                    r = get_user_role(em) if em else "?"
+                    ollama = check_ollama()
+                    tool_header("session")
+                    tool_result(f"User:     {em or '?'}")
+                    tool_result(f"Role:     {r.upper()}")
+                    tool_result(f"Auth:     {'Active' if em and tok and is_valid_token(tok) else 'Inactive'}")
+                    tool_result(f"Model:    {MODEL_NAME}")
+                    tool_result(f"Ollama:   {'Connected' if ollama else 'Disconnected'}")
+                    tool_result(f"Ollama:   {OLLAMA_URL}")
+                    tool_result(f"Portal:   {AUTH_URL}")
+                    tool_result(f"Config:   {CONFIG_DIR}")
+                    tool_result(f"Messages: {len(messages)}")
                     continue
 
-                # /status
                 elif cmd == '/status':
                     em = get_stored_email()
                     tok = get_stored_token()
-                    has_auth = em and tok and is_valid_token(tok)
-                    cfg_ok = os.path.exists(CONFIG_FILE)
-                    ollama_ok = False
-                    try:
-                        r = httpx.get("http://localhost:11434/api/tags", timeout=2)
-                        ollama_ok = r.status_code == 200
-                    except Exception:
-                        pass
-
-                    t = Table(title="System Status", border_style="cyan", box=box.ROUNDED)
-                    t.add_column("Check", style="bold cyan")
-                    t.add_column("Status")
-                    t.add_row("Auth", " Authenticated" if has_auth else " Not authenticated")
-                    t.add_row("Config", f" {CONFIG_FILE}" if cfg_ok else "  Missing")
-                    t.add_row("Ollama", " Connected" if ollama_ok else " Not reachable")
-                    if em:
-                        t.add_row("User", em)
-                        t.add_row("Role", get_user_role(em).upper())
-                    console.print(t)
-                    if not ollama_ok:
-                        console.print("\n[warning]  Ollama is not running. Start it with: [bold]ollama serve[/bold][/warning]")
+                    has = em and tok and is_valid_token(tok)
+                    ollama = check_ollama()
+                    tool_header("status")
+                    console.print(f"  [dim]|[/dim]  Auth:   {'[success]Active[/success]' if has else '[error]Inactive[/error]'}")
+                    console.print(f"  [dim]|[/dim]  Ollama: {'[success]Running[/success]' if ollama else '[error]Not reachable[/error]'}")
+                    console.print(f"  [dim]|[/dim]  Python: {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")
+                    if not ollama:
+                        console.print(f"  [dim]|[/dim]  [warning]! Start Ollama with: ollama serve[/warning]")
                     continue
 
-                # /doctor
                 elif cmd == '/doctor':
-                    console.print("[bold] Mythos Health Check[/bold]\n")
-                    checks = []
-
-                    # config dir
-                    checks.append(("Config dir", "" if os.path.exists(CONFIG_DIR) else "", CONFIG_DIR))
-                    # config file
-                    checks.append(("Config file", "" if os.path.exists(CONFIG_FILE) else "  Not found", CONFIG_FILE))
-                    # credentials
+                    ollama = check_ollama()
                     em = get_stored_email()
                     tok = get_stored_token()
                     tok_ok = is_valid_token(tok)
+                    tool_header("doctor")
+                    console.print(f"  [dim]|[/dim]  Config dir:  {'[success]OK[/success]' if os.path.exists(CONFIG_DIR) else '[error]MISSING[/error]'}")
+                    console.print(f"  [dim]|[/dim]  Config file: {'[success]OK[/success]' if os.path.exists(CONFIG_FILE) else '[warning]Not found[/warning]'}")
                     if em and tok and tok_ok:
-                        checks.append(("Credentials", " Valid", f"{em} / {tok[:20]}..."))
+                        console.print(f"  [dim]|[/dim]  Credentials: [success]Valid[/success]")
                     elif em and tok:
-                        checks.append(("Credentials", "  Bad token", "Token format is wrong"))
+                        console.print(f"  [dim]|[/dim]  Credentials: [error]Bad token[/error]")
                     else:
-                        checks.append(("Credentials", " Missing", "Run /reauth"))
-                    # python
-                    py = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
-                    checks.append(("Python", f" {py}", ""))
-                    # ollama
-                    try:
-                        r = httpx.get("http://localhost:11434/api/tags", timeout=2)
-                        if r.status_code == 200:
-                            checks.append(("Ollama", " Connected", "localhost:11434"))
-                        else:
-                            checks.append(("Ollama", f"  Status {r.status_code}", ""))
-                    except Exception as e:
-                        checks.append(("Ollama", " Not reachable", str(e).split("(")[0]))
-
-                    t = Table(border_style="cyan", box=box.ROUNDED)
-                    t.add_column("Check", style="bold cyan")
-                    t.add_column("Result")
-                    t.add_column("Detail", style="dim")
-                    for n, s, d in checks:
-                        t.add_row(n, s, d)
-                    console.print(t)
-
-                    all_good = all("" in c[1] for c in checks)
-                    console.print("\n[success] All systems operational.[/success]" if all_good else "\n[warning]  Some issues found.[/warning]")
+                        console.print(f"  [dim]|[/dim]  Credentials: [error]Missing (run /reauth)[/error]")
+                    console.print(f"  [dim]|[/dim]  Python:      {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")
+                    console.print(f"  [dim]|[/dim]  Ollama:      {'[success]Connected[/success]' if ollama else '[error]Not reachable[/error]'}")
                     continue
 
-                # /config
                 elif cmd == '/config':
-                    console.print(f"[info]Config:[/info] [bold]{CONFIG_FILE}[/bold]")
+                    tool_header("config")
+                    tool_result(f"Config: {CONFIG_FILE}")
                     if os.path.exists(CONFIG_FILE):
                         try:
                             cfg = load_config()
-                            safe = {k: (v[:20] + "..." if k == "token" and len(v) > 20 else v) for k, v in cfg.items()}
-                            console.print(Panel(json.dumps(safe, indent=2), title="Contents", border_style="cyan"))
-                        except Exception:
-                            console.print("[error]Could not read config.[/error]")
+                            safe = {k: (v[:20]+"..." if k=="token" and len(v)>20 else v) for k,v in cfg.items()}
+                            tool_result(json.dumps(safe, indent=2))
+                        except: tool_error("Could not read config")
                     else:
-                        console.print("[warning]No config file yet.[/warning]")
+                        tool_result("[warning]No config file[/warning]")
                     continue
 
-                # /reauth
                 elif cmd == '/reauth':
                     clear_credentials()
                     if require_auth():
-                        console.print("[success] Re-authentication successful.[/success]")
+                        console.print("  [success]  Re-authenticated[/success]")
                     continue
 
-                # /logout
                 elif cmd == '/logout':
                     clear_credentials()
-                    console.print("[info]Credentials cleared. You are logged out.[/info]")
-                    console.print("[info]Run [command]mythos[/command] again to re-authenticate.[/info]")
+                    console.print("  [info]Credentials cleared. Run mythos again.[/info]")
                     break
 
-                # /admin
                 elif cmd == '/admin':
                     em = get_stored_email()
                     if not is_admin_email(em):
-                        console.print("[error]Access denied. Admin only.[/error]")
+                        tool_error("Access denied. Admin only.")
                         continue
                     tok = get_stored_token() or ""
-                    td = tok[:20] + "..." if len(tok) > 20 else tok
-                    console.print(Panel(
-                        f"[bold yellow] Mythos Admin Console[/bold yellow]\n\n"
-                        f"  Admin:      {em}\n"
-                        f"  Token:      {td}\n"
-                        f"  Config:     {CONFIG_FILE}\n"
-                        f"  Model:      {MODEL_NAME}\n"
-                        f"  Ollama:     {OLLAMA_URL}\n"
-                        f"  Portal:     {AUTH_URL}\n",
-                        title="Admin", border_style="yellow"
-                    ))
+                    td = tok[:20]+"..." if len(tok)>20 else tok
+                    tool_header("admin", "Admin Console")
+                    tool_result(f"Admin:  {em}")
+                    tool_result(f"Token:  {td}")
+                    tool_result(f"Config: {CONFIG_FILE}")
+                    tool_result(f"Model:  {MODEL_NAME}")
+                    tool_result(f"Ollama: {OLLAMA_URL}")
                     continue
 
-                # /model
                 elif cmd == '/model':
-                    console.print(f"[info]Model: [bold]{MODEL_NAME}[/bold] via Ollama at {OLLAMA_URL}[/info]")
+                    tool_header("model")
+                    tool_result(f"Model: {MODEL_NAME}")
+                    tool_result(f"Engine: Ollama ({OLLAMA_URL})")
                     continue
 
-                # unknown
-                else:
-                    console.print(f"[error]Unknown command: {cmd}. Type /help for a list.[/error]\n")
+            # =========================== WEB / NETWORK COMMANDS ===========================
+
+            if is_cmd:
+                if cmd == '/search':
+                    if not args:
+                        tool_error("Usage: /search <query>")
+                        continue
+                    tool_header("search", args)
+                    results = web_search(args)
+                    if isinstance(results, dict) and "error" in results:
+                        tool_error(f"Search failed: {results['error']}")
+                        continue
+                    if not results:
+                        tool_result("[warning]No results[/warning]")
+                        continue
+                    for i, r in enumerate(results, 1):
+                        console.print(f"  [dim]|[/dim] [bold]{i}.[/bold] {r.get('title','')}")
+                        console.print(f"  [dim]|[/dim]  [cyan]{r.get('href','')}[/cyan]")
+                        snippet = r.get('body','')[:150]
+                        if snippet:
+                            console.print(f"  [dim]|[/dim]  [dim]{snippet}[/dim]")
+                        if i < len(results):
+                            console.print(f"  [dim]|[/dim]")
                     continue
 
-            # ====== NORMAL MESSAGE ======
+                elif cmd == '/fetch':
+                    if not args:
+                        tool_error("Usage: /fetch <url>")
+                        continue
+                    tool_header("fetch", args)
+                    result = fetch_page(args)
+                    if "error" in result:
+                        tool_error(f"Failed: {result['error']}")
+                        continue
+                    tool_result(f"Status: {result['status']}  |  URL: {result['url']}")
+                    tool_result(f"Size: {len(result['content'])} bytes")
+                    text = result['content']
+                    if text.strip():
+                        # Remove HTML tags for cleaner display
+                        clean = re.sub(r'<[^>]+>', '', text)
+                        clean = re.sub(r'\s+', ' ', clean).strip()
+                        if len(clean) > 2000:
+                            clean = clean[:2000] + " [dim]...[/dim]"
+                        lines = clean.split(". ")
+                        display = ".\n  [dim]|[/dim]  ".join(lines[:10])
+                        console.print(f"  [dim]|[/dim]  {display}")
+                    continue
+
+                elif cmd == '/scan':
+                    if not args:
+                        tool_error("Usage: /scan <host>")
+                        continue
+                    tool_header("scan", args)
+                    console.print(f"  [dim]|[/dim]  Scanning...")
+                    ports = scan_ports(args)
+                    if not ports:
+                        tool_result("[warning]No open ports found[/warning]")
+                        continue
+                    for p in ports:
+                        svc = COMMON_PORTS.get(p, "?")
+                        console.print(f"  [dim]|[/dim]  [bold]{p}[/bold]/tcp  [cyan]{svc}[/cyan]")
+                    console.print(f"  [dim]|[/dim]  [dim]{len(ports)} open port(s)[/dim]")
+                    continue
+
+                elif cmd == '/dns':
+                    if not args:
+                        tool_error("Usage: /dns <domain>")
+                        continue
+                    tool_header("dns", args)
+                    records = dns_lookup(args)
+                    for rtype, vals in records.items():
+                        for v in vals:
+                            console.print(f"  [dim]|[/dim]  {rtype:16} {v}")
+                    continue
+
+                elif cmd == '/http':
+                    if not args:
+                        tool_error("Usage: /http <url>")
+                        continue
+                    tool_header("http", args)
+                    result = http_headers(args)
+                    if "error" in result:
+                        tool_error(f"Failed: {result['error']}")
+                        continue
+                    for k, v in result.items():
+                        val = str(v)
+                        if v in ("Yes", "No"):
+                            val = f"[success]{v}[/success]" if v == "Yes" else f"[dim]{v}[/dim]"
+                        elif k == "Status":
+                            color = "success" if 200 <= int(v) < 400 else "error"
+                            val = f"[{color}]{v}[/{color}]"
+                        console.print(f"  [dim]|[/dim]  {k:20} {val}")
+                    continue
+
+                elif cmd == '/ip':
+                    if not args:
+                        tool_header("ip", "your public IP")
+                        try:
+                            r = httpx.get("https://api.ipify.org?format=json", timeout=5)
+                            data = r.json()
+                            tool_result(f"Public IP: [accent]{data.get('ip','?')}[/accent]")
+                        except:
+                            tool_error("Could not determine public IP")
+                        continue
+                    tool_header("ip", args)
+                    result = resolve_ip(args)
+                    if "error" in result:
+                        tool_error(f"Failed: {result['error']}")
+                        continue
+                    for ip in result.get("ips", []):
+                        try:
+                            t = "IPv6" if isinstance(ipaddress.ip_address(ip), ipaddress.IPv6Address) else "IPv4"
+                        except: t = "?"
+                        console.print(f"  [dim]|[/dim]  {t:6}  [accent]{ip}[/accent]")
+                    continue
+
+            # =========================== SECURITY AUDIT COMMANDS ===========================
+
+            if is_cmd:
+                if cmd == '/ssl':
+                    if not args:
+                        tool_error("Usage: /ssl <host> [port]")
+                        continue
+                    parts = args.split()
+                    host = parts[0]
+                    port = int(parts[1]) if len(parts) > 1 else 443
+                    tool_header("ssl", f"{host}:{port}")
+                    result = ssl_check(host, port)
+                    if "error" in result:
+                        tool_error(f"Failed: {result['error']}")
+                        continue
+                    console.print(f"  [dim]|[/dim]  Subject:    {result.get('subject',{}).get('commonName','?')}")
+                    console.print(f"  [dim]|[/dim]  Issuer:     {result.get('issuer',{}).get('organizationName','?')}")
+                    console.print(f"  [dim]|[/dim]  Valid From: {result.get('not_before','?')}")
+                    console.print(f"  [dim]|[/dim]  Valid To:   {result.get('not_after','?')}")
+                    console.print(f"  [dim]|[/dim]  Serial:     {result.get('serial','?')[:30]}")
+                    if result.get('sans'):
+                        console.print(f"  [dim]|[/dim]  SANs:       {', '.join(result['sans'][:5])}" + ("..." if len(result['sans'])>5 else ""))
+                    cipher = result.get('cipher')
+                    if cipher:
+                        console.print(f"  [dim]|[/dim]  Cipher:     {cipher[0]} ({cipher[1]} bits)")
+                    now = datetime.datetime.utcnow()
+                    try:
+                        expiry = datetime.datetime.strptime(result['not_after'], "%b %d %H:%M:%S %Y %Z")
+                        days = (expiry - now).days
+                        if days < 0:
+                            console.print(f"  [dim]|[/dim]  [error]EXPIRED ({abs(days)} days ago)[/error]")
+                        elif days < 30:
+                            console.print(f"  [dim]|[/dim]  [warning]Expiring in {days} days[/warning]")
+                        else:
+                            console.print(f"  [dim]|[/dim]  Expires in {days} days")
+                    except: pass
+                    continue
+
+                elif cmd == '/whois':
+                    if not args:
+                        tool_error("Usage: /whois <domain>")
+                        continue
+                    tool_header("whois", args)
+                    result = whois_lookup(args)
+                    if "error" in result:
+                        tool_error(f"WHOIS lookup failed: {result['error']}")
+                        # Show what we can from DNS as fallback
+                        tool_header("dns", args + " (fallback)")
+                        records = dns_lookup(args)
+                        for rtype, vals in records.items():
+                            for v in vals:
+                                console.print(f"  [dim]|[/dim]  {rtype:16} {v}")
+                        continue
+                    if "raw" in result:
+                        for line in result["raw"].split("\n")[:20]:
+                            console.print(f"  [dim]|[/dim]  {line}")
+                    else:
+                        for k, v in list(result.items())[:15]:
+                            console.print(f"  [dim]|[/dim]  {str(k):25} {str(v)[:100]}")
+                    continue
+
+                elif cmd == '/subdomains':
+                    if not args:
+                        tool_error("Usage: /subdomains <domain>")
+                        continue
+                    tool_header("subdomains", args)
+                    console.print(f"  [dim]|[/dim]  Probing 30 common subdomains...")
+                    found = subdomain_enum(args)
+                    if not found:
+                        tool_result("[warning]No subdomains found[/warning]")
+                        continue
+                    for sub, ip in found:
+                        console.print(f"  [dim]|[/dim]  [accent]{sub}[/accent].[dim]{args}[/dim]  ->  [cyan]{ip}[/cyan]")
+                    console.print(f"  [dim]|[/dim]  [dim]{len(found)} subdomain(s) found[/dim]")
+                    continue
+
+                elif cmd == '/banner':
+                    parts = args.split()
+                    if len(parts) < 2:
+                        tool_error("Usage: /banner <host> <port>")
+                        continue
+                    host = parts[0]
+                    try:
+                        port = int(parts[1])
+                    except:
+                        tool_error("Port must be a number")
+                        continue
+                    tool_header("banner", f"{host}:{port}")
+                    result = banner_grab(host, port)
+                    if "error" in result:
+                        tool_error(f"{result['service']}: {result['error']}")
+                        continue
+                    tool_result(f"Port {result['port']} ({result['service']})")
+                    if result.get('banner'):
+                        for line in result['banner'].split("\n"):
+                            console.print(f"  [dim]|[/dim]  [dim]{line}[/dim]")
+                    continue
+
+            # =========================== NORMAL AI MESSAGE ===========================
+
+            if is_cmd:
+                console.print(f"  [error]Unknown: {cmd}. Type /help[/error]\n")
+                continue
+
+            # Send to AI model
             messages.append({"role": "user", "content": user_input})
             full_response = ""
-            console.print("\n[assistant]Mythos[/assistant]")
+
+            # Tool-call-style header
+            tool_header("think")
 
             payload = {"model": MODEL_NAME, "messages": messages, "stream": True}
 
-            while msvcrt.kbhit():
-                msvcrt.getch()
+            while msvcrt.kbhit(): msvcrt.getch()
 
             with Live("", console=console, refresh_per_second=15, vertical_overflow="visible") as live:
                 live.update(Status("[dim italic]Thinking...[/dim italic]", spinner="dots", console=console))
@@ -447,7 +862,7 @@ async def chat():
                     async with httpx.AsyncClient() as client:
                         async with client.stream("POST", OLLAMA_URL, json=payload, timeout=None) as resp:
                             if resp.status_code != 200:
-                                live.update(f"[error]Ollama returned status {resp.status_code}[/error]")
+                                live.update(f"[error]Ollama returned {resp.status_code}[/error]")
                                 continue
                             started = False
                             async for line in resp.aiter_lines():
@@ -476,11 +891,10 @@ async def chat():
             messages.append({"role": "assistant", "content": full_response})
 
         except KeyboardInterrupt:
-            console.print("\n[info]Interrupted. Type /exit to quit.[/info]")
+            console.print("\n  [info]Interrupted.[/info]")
             continue
         except EOFError:
             break
-
 
 if __name__ == "__main__":
     try:
