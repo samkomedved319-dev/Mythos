@@ -29,7 +29,11 @@
       <div class="dashboard-header">
         <div>
           <h1>Welcome, <span id="dashboard-name">—</span></h1>
-          <p style="color: var(--text-secondary); font-size: 0.9rem;">Your Mythos sovereign command center.</p>
+          <p style="color: var(--text-secondary); font-size: 0.9rem;">
+            <span id="dashboard-role">User</span>
+            &middot;
+            <span id="dashboard-email">—</span>
+          </p>
         </div>
         <a href="#" id="dashboard-logout" class="btn btn-ghost btn-sm">Logout</a>
       </div>
@@ -39,7 +43,7 @@
         <div class="card">
           <h3 style="margin-bottom: 4px;">🔑 Your API Token</h3>
           <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 8px;">
-            Use this token to authenticate the Mythos CLI on any machine.
+            Use this token <strong>together with your email</strong> to authenticate the Mythos CLI.
           </p>
           <div class="token-display">
             <span class="token-value" id="dashboard-token">—</span>
@@ -47,11 +51,11 @@
           </div>
         </div>
 
-        <!-- Setup Instructions -->
+        <!-- CLI Setup Instructions -->
         <div class="card">
           <h3 style="margin-bottom: 4px;">🚀 CLI Setup</h3>
           <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 12px;">
-            Follow these steps to start using Mythos in your terminal.
+            Follow these steps to authenticate and start using Mythos.
           </p>
           <div class="setup-steps">
             <div class="setup-step">
@@ -64,25 +68,30 @@
             <div class="setup-step">
               <span class="step-num">2</span>
               <span class="step-text">
-                Clone the repository:
+                Clone the repo:
                 <br /><code>git clone https://github.com/samkomedved319-dev/Mythos.git</code>
+                <br /><code>cd Mythos</code>
               </span>
             </div>
             <div class="setup-step">
               <span class="step-num">3</span>
               <span class="step-text">
-                Install dependencies:
+                Install dependencies &amp; build model:
                 <br /><code>pip install -r requirements.txt</code>
+                <br /><code>ollama create mythos -f Modelfile</code>
               </span>
             </div>
             <div class="setup-step">
               <span class="step-num">4</span>
               <span class="step-text">
-                Run and authenticate:
+                Run the CLI and authenticate:
                 <br /><code>python mythos_cli.py</code>
-                <br />Paste your token when prompted.
+                <br />Enter your <strong>email</strong> and <strong>token</strong> when prompted.
               </span>
             </div>
+          </div>
+          <div style="margin-top: 16px; display: flex; gap: 8px; flex-wrap: wrap;">
+            <button class="btn btn-secondary btn-sm" id="setup-copy">📋 Copy Setup Command</button>
           </div>
         </div>
 
@@ -90,7 +99,7 @@
         <div class="card">
           <h3 style="margin-bottom: 4px;">👤 Account</h3>
           <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 12px;">
-            Your account details.
+            Your account details and credentials for CLI authentication.
           </p>
           <div style="display: flex; flex-direction: column; gap: 8px;">
             <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border);">
@@ -98,6 +107,14 @@
               <span id="dashboard-name-display" style="font-size: 0.9rem;">—</span>
             </div>
             <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border);">
+              <span style="color: var(--text-secondary); font-size: 0.85rem;">Email</span>
+              <span id="dashboard-email-display" style="font-size: 0.9rem; font-family: var(--font-mono);">—</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border);">
+              <span style="color: var(--text-secondary); font-size: 0.85rem;">Role</span>
+              <span id="dashboard-role-display" style="font-size: 0.9rem;">—</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; padding: 8px 0;">
               <span style="color: var(--text-secondary); font-size: 0.85rem;">Status</span>
               <span style="font-size: 0.9rem; color: var(--success);">Active</span>
             </div>
@@ -113,8 +130,33 @@
           <div style="display: flex; flex-direction: column; gap: 10px;">
             <a href="https://github.com/samkomedved319-dev/Mythos" target="_blank" style="font-size: 0.9rem;">📦 GitHub Repository</a>
             <a href="https://ollama.com/" target="_blank" style="font-size: 0.9rem;">🤖 Ollama</a>
+            <a href="index.html" style="font-size: 0.9rem;">🏛️ Mythos Home</a>
           </div>
         </div>
+
+        <!-- Admin Panel (only visible to admin users) -->
+        <div class="card hidden" id="admin-panel" style="grid-column: 1 / -1;">
+          <h3 style="margin-bottom: 4px;">👑 Admin Panel</h3>
+          <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 12px;">
+            Mythos owner controls. You are the first registered account.
+          </p>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+            <div style="background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; padding: 16px;">
+              <div style="color: var(--text-muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;">Registered Users</div>
+              <div style="font-size: 2rem; font-weight: 700; color: var(--accent);" id="admin-user-count">0</div>
+            </div>
+            <div style="background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; padding: 16px;">
+              <div style="color: var(--text-muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;">Admin Email</div>
+              <div style="font-size: 0.9rem; font-family: var(--font-mono); color: var(--warning);" id="admin-email-show">—</div>
+            </div>
+          </div>
+          <div style="margin-top: 16px; padding: 12px; background: rgba(253, 203, 110, 0.08); border: 1px solid rgba(253, 203, 110, 0.2); border-radius: 8px;">
+            <p style="color: var(--warning); font-size: 0.85rem;">
+              ⚠️ Admin privileges are tied to this email. Share your token wisely.
+            </p>
+          </div>
+        </div>
+
       </div>
     </div>
   </div>
@@ -127,22 +169,33 @@
 
   <script src="js/auth.js"></script>
   <script>
-    // Extra: populate name display on dashboard
+    // Extra: populate dashboard display fields from localStorage
     document.addEventListener('DOMContentLoaded', function () {
-      const user = (function() {
-        try {
-          const s = JSON.parse(localStorage.getItem('mythos_session'));
-          if (s && s.email) {
-            const users = JSON.parse(localStorage.getItem('mythos_users')) || {};
-            return users[s.email] || null;
+      try {
+        var sessionData = JSON.parse(localStorage.getItem('mythos_session'));
+        if (sessionData && sessionData.email) {
+          var users = JSON.parse(localStorage.getItem('mythos_users')) || {};
+          var user = users[sessionData.email] || null;
+          if (user) {
+            var nameDisplay = document.getElementById('dashboard-name-display');
+            if (nameDisplay) nameDisplay.textContent = user.name;
+
+            var emailDisplay = document.getElementById('dashboard-email-display');
+            if (emailDisplay) emailDisplay.textContent = user.email;
+
+            var roleDisplay = document.getElementById('dashboard-role-display');
+            if (roleDisplay) {
+              if (user.role === 'admin') {
+                roleDisplay.innerHTML = '👑 Admin / Owner';
+                roleDisplay.style.color = 'var(--warning)';
+              } else {
+                roleDisplay.textContent = 'User';
+                roleDisplay.style.color = 'var(--text-secondary)';
+              }
+            }
           }
-        } catch(e) {}
-        return null;
-      })();
-      if (user) {
-        const el = document.getElementById('dashboard-name-display');
-        if (el) el.textContent = user.name;
-      }
+        }
+      } catch(e) {}
     });
   </script>
 </body>
