@@ -17,9 +17,9 @@ from rich import box
 from rich.text import Text
 from rich.align import Align
 
-# ──────────────────────────────────────────────
+# --------------------------------------------------------------------------------------------
 #  CONFIGURATION
-# ──────────────────────────────────────────────
+# --------------------------------------------------------------------------------------------
 
 OLLAMA_URL = "http://localhost:11434/api/chat"
 MODEL_NAME = "mythos"
@@ -29,9 +29,9 @@ CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
 TOKEN_PATTERN = re.compile(r"^mth_[a-z0-9]{8}-[a-z0-9]{8}-[a-z0-9]{8}-[a-z0-9]{8}$")
 ADMIN_EMAIL = "samkomedved319@gmail.com"
 
-# ──────────────────────────────────────────────
+# --------------------------------------------------------------------------------------------
 #  RICH THEME
-# ──────────────────────────────────────────────
+# --------------------------------------------------------------------------------------------
 
 custom_theme = Theme({
     "info": "dim cyan",
@@ -45,9 +45,9 @@ custom_theme = Theme({
 })
 console = Console(theme=custom_theme)
 
-# ──────────────────────────────────────────────
+# --------------------------------------------------------------------------------------------
 #  CONFIG / CREDENTIALS
-# ──────────────────────────────────────────────
+# --------------------------------------------------------------------------------------------
 
 def load_config():
     if not os.path.exists(CONFIG_FILE):
@@ -90,9 +90,9 @@ def is_admin_email(email):
 def get_user_role(email):
     return "admin" if is_admin_email(email) else "user"
 
-# ──────────────────────────────────────────────
-#  AUTH – SIMPLE, RELIABLE, MANUAL
-# ──────────────────────────────────────────────
+# --------------------------------------------------------------------------------------------
+#  AUTH  SIMPLE, RELIABLE, MANUAL
+# --------------------------------------------------------------------------------------------
 
 def require_auth():
     """Gate: check stored credentials; if missing, prompt user to
@@ -104,19 +104,19 @@ def require_auth():
     if email and token and is_valid_token(token):
         return True  # already authenticated
 
-    # ── Auth screen ──
+    # ---- Auth screen ----
     console.clear()
     console.print()
     console.print(Panel(
-        "[bold]Welcome to Mythos — Sovereign Architect[/bold]\n\n"
+        "[bold]Welcome to Mythos  Sovereign Architect[/bold]\n\n"
         "This CLI requires authentication.\n\n"
-        f"🌐  Open this link in your browser:\n"
+        f"  Open this link in your browser:\n"
         f"    [bold cyan underline]{AUTH_URL}[/bold cyan underline]\n\n"
-        "📝  Sign up or log in\n"
-        "📋  Copy your [bold]email[/bold] and [bold]API token[/bold] from the Dashboard\n"
-        "⌨️  Paste them below\n\n"
+        "  Sign up or log in\n"
+        "  Copy your [bold]email[/bold] and [bold]API token[/bold] from the Dashboard\n"
+        "  Paste them below\n\n"
         "It takes 30 seconds.",
-        title="🔐 Authentication Required",
+        title=" Authentication Required",
         border_style="yellow",
     ))
     console.print()
@@ -132,7 +132,7 @@ def require_auth():
             console.print("[error]Please enter a valid email address.[/error]\n")
             continue
 
-        # email looks OK → ask for token
+        # email looks OK  ask for token
         break
 
     while True:
@@ -163,16 +163,16 @@ def require_auth():
 
     console.print()
     if role == "admin":
-        console.print("[success]👑 ✓ Authenticated as Mythos Admin / Owner[/success]")
+        console.print("[success]  Authenticated as Mythos Admin / Owner[/success]")
     else:
-        console.print("[success]✓ Authentication successful![/success]")
+        console.print("[success] Authentication successful![/success]")
     console.print("[info]Type [command]/help[/command] to see available commands.[/info]\n")
     return True
 
 
-# ──────────────────────────────────────────────
+# --------------------------------------------------------------------------------------------
 #  CHAT LOOP
-# ──────────────────────────────────────────────
+# --------------------------------------------------------------------------------------------
 
 def check_stop_key():
     if msvcrt.kbhit():
@@ -185,25 +185,25 @@ def check_stop_key():
 async def chat():
     messages = []
 
-    # ── Auth gate ──
+    # ---- Auth gate ----
     if not require_auth():
         return
 
     email = get_stored_email()
     role  = get_user_role(email)
-    role_tag = " 👑 Admin" if role == "admin" else ""
+    role_tag = "  Admin" if role == "admin" else ""
 
     console.print(f"[info]Mythos Sovereign Architect | model: {MODEL_NAME} | {email}{role_tag}[/info]")
     console.print("[info]Type [command]/help[/command] for commands, [command]/exit[/command] to quit.[/info]\n")
 
     while True:
         try:
-            user_input = console.input("[user]You[/user] [prompt]›[/prompt] ").strip()
+            user_input = console.input("[user]You[/user] [prompt][/prompt] ").strip()
 
             if not user_input:
                 continue
 
-            # ── Slash commands ──
+            # ---- Slash commands ----
             if user_input.startswith('/'):
                 cmd = user_input.lower().split()[0]
 
@@ -253,8 +253,8 @@ async def chat():
                     em = get_stored_email()
                     if em and tok and is_valid_token(tok):
                         r = get_user_role(em)
-                        icon = "👑 " if r == "admin" else ""
-                        console.print(f"[success]{icon}✓ Authenticated[/success]")
+                        icon = " " if r == "admin" else ""
+                        console.print(f"[success]{icon} Authenticated[/success]")
                         console.print(f"  Email: [bold]{em}[/bold]")
                         console.print(f"  Token: [dim]{tok[:20]}...[/dim]")
                         console.print(f"  Role:  [bold]{r}[/bold]")
@@ -269,13 +269,13 @@ async def chat():
                     tok = get_stored_token()
                     if em:
                         r = get_user_role(em)
-                        icon = "👑 " if r == "admin" else ""
+                        icon = " " if r == "admin" else ""
                         t = Table(title=f"{icon}Account Details", border_style="cyan", box=box.ROUNDED)
                         t.add_column("Field", style="bold cyan")
                         t.add_column("Value")
                         t.add_row("Email", em)
                         t.add_row("Role", r.upper())
-                        t.add_row("Authenticated", "✅ Yes" if tok and is_valid_token(tok) else "❌ No")
+                        t.add_row("Authenticated", " Yes" if tok and is_valid_token(tok) else " No")
                         t.add_row("Config", CONFIG_FILE)
                         console.print(t)
                     else:
@@ -286,14 +286,14 @@ async def chat():
                 elif cmd == '/session':
                     em = get_stored_email()
                     tok = get_stored_token()
-                    r = get_user_role(em) if em else "—"
-                    icon = "👑 " if r == "admin" else ""
+                    r = get_user_role(em) if em else ""
+                    icon = " " if r == "admin" else ""
                     t = Table(title=f"{icon}Session", border_style="cyan", box=box.ROUNDED)
                     t.add_column("Property", style="bold cyan")
                     t.add_column("Value")
-                    t.add_row("User", em or "—")
+                    t.add_row("User", em or "")
                     t.add_row("Role", r.upper())
-                    t.add_row("Auth", "✅ Active" if em and tok and is_valid_token(tok) else "❌ Inactive")
+                    t.add_row("Auth", " Active" if em and tok and is_valid_token(tok) else " Inactive")
                     t.add_row("Model", MODEL_NAME)
                     t.add_row("Ollama", OLLAMA_URL)
                     t.add_row("Portal", AUTH_URL)
@@ -318,48 +318,48 @@ async def chat():
                     t = Table(title="System Status", border_style="cyan", box=box.ROUNDED)
                     t.add_column("Check", style="bold cyan")
                     t.add_column("Status")
-                    t.add_row("Auth", "✅ Authenticated" if has_auth else "❌ Not authenticated")
-                    t.add_row("Config", f"✅ {CONFIG_FILE}" if cfg_ok else "⚠️  Missing")
-                    t.add_row("Ollama", "✅ Connected" if ollama_ok else "❌ Not reachable")
+                    t.add_row("Auth", " Authenticated" if has_auth else " Not authenticated")
+                    t.add_row("Config", f" {CONFIG_FILE}" if cfg_ok else "  Missing")
+                    t.add_row("Ollama", " Connected" if ollama_ok else " Not reachable")
                     if em:
                         t.add_row("User", em)
                         t.add_row("Role", get_user_role(em).upper())
                     console.print(t)
                     if not ollama_ok:
-                        console.print("\n[warning]⚠️  Ollama is not running. Start it with: [bold]ollama serve[/bold][/warning]")
+                        console.print("\n[warning]  Ollama is not running. Start it with: [bold]ollama serve[/bold][/warning]")
                     continue
 
                 # /doctor
                 elif cmd == '/doctor':
-                    console.print("[bold]🔍 Mythos Health Check[/bold]\n")
+                    console.print("[bold] Mythos Health Check[/bold]\n")
                     checks = []
 
                     # config dir
-                    checks.append(("Config dir", "✅" if os.path.exists(CONFIG_DIR) else "❌", CONFIG_DIR))
+                    checks.append(("Config dir", "" if os.path.exists(CONFIG_DIR) else "", CONFIG_DIR))
                     # config file
-                    checks.append(("Config file", "✅" if os.path.exists(CONFIG_FILE) else "⚠️  Not found", CONFIG_FILE))
+                    checks.append(("Config file", "" if os.path.exists(CONFIG_FILE) else "  Not found", CONFIG_FILE))
                     # credentials
                     em = get_stored_email()
                     tok = get_stored_token()
                     tok_ok = is_valid_token(tok)
                     if em and tok and tok_ok:
-                        checks.append(("Credentials", "✅ Valid", f"{em} / {tok[:20]}..."))
+                        checks.append(("Credentials", " Valid", f"{em} / {tok[:20]}..."))
                     elif em and tok:
-                        checks.append(("Credentials", "⚠️  Bad token", "Token format is wrong"))
+                        checks.append(("Credentials", "  Bad token", "Token format is wrong"))
                     else:
-                        checks.append(("Credentials", "❌ Missing", "Run /reauth"))
+                        checks.append(("Credentials", " Missing", "Run /reauth"))
                     # python
                     py = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
-                    checks.append(("Python", f"✅ {py}", ""))
+                    checks.append(("Python", f" {py}", ""))
                     # ollama
                     try:
                         r = httpx.get("http://localhost:11434/api/tags", timeout=2)
                         if r.status_code == 200:
-                            checks.append(("Ollama", "✅ Connected", "localhost:11434"))
+                            checks.append(("Ollama", " Connected", "localhost:11434"))
                         else:
-                            checks.append(("Ollama", f"⚠️  Status {r.status_code}", ""))
+                            checks.append(("Ollama", f"  Status {r.status_code}", ""))
                     except Exception as e:
-                        checks.append(("Ollama", "❌ Not reachable", str(e).split("(")[0]))
+                        checks.append(("Ollama", " Not reachable", str(e).split("(")[0]))
 
                     t = Table(border_style="cyan", box=box.ROUNDED)
                     t.add_column("Check", style="bold cyan")
@@ -369,8 +369,8 @@ async def chat():
                         t.add_row(n, s, d)
                     console.print(t)
 
-                    all_good = all("✅" in c[1] for c in checks)
-                    console.print("\n[success]✅ All systems operational.[/success]" if all_good else "\n[warning]⚠️  Some issues found.[/warning]")
+                    all_good = all("" in c[1] for c in checks)
+                    console.print("\n[success] All systems operational.[/success]" if all_good else "\n[warning]  Some issues found.[/warning]")
                     continue
 
                 # /config
@@ -391,7 +391,7 @@ async def chat():
                 elif cmd == '/reauth':
                     clear_credentials()
                     if require_auth():
-                        console.print("[success]✓ Re-authentication successful.[/success]")
+                        console.print("[success] Re-authentication successful.[/success]")
                     continue
 
                 # /logout
@@ -407,10 +407,10 @@ async def chat():
                     if not is_admin_email(em):
                         console.print("[error]Access denied. Admin only.[/error]")
                         continue
-                    tok = get_stored_token() or "—"
+                    tok = get_stored_token() or ""
                     td = tok[:20] + "..." if len(tok) > 20 else tok
                     console.print(Panel(
-                        f"[bold yellow]👑 Mythos Admin Console[/bold yellow]\n\n"
+                        f"[bold yellow] Mythos Admin Console[/bold yellow]\n\n"
                         f"  Admin:      {em}\n"
                         f"  Token:      {td}\n"
                         f"  Config:     {CONFIG_FILE}\n"
@@ -486,4 +486,9 @@ if __name__ == "__main__":
     try:
         asyncio.run(chat())
     except KeyboardInterrupt:
-        pass
+        sys.exit(0)
+    except EOFError:
+        sys.exit(0)
+    except Exception as e:
+        console.print(f"\n[error]Error: {e}[/error]")
+        sys.exit(1)
