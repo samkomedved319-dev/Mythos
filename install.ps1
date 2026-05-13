@@ -1,22 +1,21 @@
-# Mythos: Sovereign Architect — One-Command Installer for Windows
-# Run this in PowerShell:
+# Mythos: Sovereign Architect -- One-Command Installer for Windows
+# Run in PowerShell:
 #   irm https://raw.githubusercontent.com/samkomedved319-dev/Mythos/main/install.ps1 | iex
 
 $Host.UI.RawUI.WindowTitle = "Mythos Setup"
 
 $RepoUrl    = "https://github.com/samkomedved319-dev/Mythos.git"
 $InstallDir = "$HOME\Mythos"
-$BinDir     = "$HOME\.local\bin"   # Already in PATH on this system
+$BinDir     = "$HOME\.local\bin"
 
 Write-Host "== Mythos Sovereign Architect Setup ==" -ForegroundColor Cyan
 Write-Host ""
 
-# ----- Step 0: Bootstrap (download repo if running remotely) -----
+# ----- Step 0: Bootstrap -----
 $RunningLocal = (Test-Path "$PSScriptRoot\mythos_cli.py") -or (Test-Path ".\mythos_cli.py")
 
 if (-not $RunningLocal) {
     Write-Host "[0] Downloading Mythos..." -ForegroundColor Yellow
-
     if (Get-Command "git" -ErrorAction SilentlyContinue) {
         if (Test-Path $InstallDir) {
             Write-Host "  Updating existing repo..." -ForegroundColor Gray
@@ -41,42 +40,64 @@ if (-not $RunningLocal) {
 
 # ----- Step 1: Python dependencies -----
 Write-Host "[1/3] Installing Python dependencies..." -ForegroundColor Yellow
-pip install -r requirements.txt 2>&1 | Out-Null
+pip install -r requirements.txt
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "  [!] pip failed. Install Python 3.10+ from https://python.org" -ForegroundColor Red
+    Write-Host "  FAILED. Install Python 3.10+ from https://python.org" -ForegroundColor Red
     exit 1
 }
 Write-Host "  OK" -ForegroundColor Green
+Write-Host ""
 
-# ----- Step 2: Build Ollama model -----
-Write-Host "[2/3] Building Ollama model 'mythos'..." -ForegroundColor Yellow
-if (Get-Command "ollama" -ErrorAction SilentlyContinue) {
-    ollama create mythos -f Modelfile 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "  [!] Model build failed. Is Ollama running?" -ForegroundColor Red
-        Write-Host "  Run: ollama serve" -ForegroundColor Gray
-        exit 1
-    }
-    Write-Host "  OK" -ForegroundColor Green
-} else {
-    Write-Host "  [!] Ollama not found. Install from https://ollama.com" -ForegroundColor Red
+# ----- Step 2: Check Ollama -----
+Write-Host "[2/3] Setting up Ollama model..." -ForegroundColor Yellow
+
+$ollamaPath = (Get-Command "ollama" -ErrorAction SilentlyContinue).Source
+if (-not $ollamaPath) {
+    Write-Host "  Ollama not found. Install from https://ollama.com first." -ForegroundColor Red
     exit 1
 }
 
-# ----- Step 3: Install 'mythos' command -----
+# Check if Ollama server is running
+try {
+    $ollamaStatus = Invoke-RestMethod -Uri "http://localhost:11434/api/tags" -Method Get -TimeoutSec 3 -ErrorAction Stop
+    Write-Host "  Ollama server: OK" -ForegroundColor Gray
+} catch {
+    Write-Host "  Ollama server is not running." -ForegroundColor Yellow
+    Write-Host "  Starting Ollama..." -ForegroundColor Gray
+    Start-Process -FilePath "ollama" -ArgumentList "serve" -WindowStyle Hidden
+    Start-Sleep -Seconds 3
+}
+
+# Pull base model if needed
+Write-Host "  Pulling base model (llama3)..." -ForegroundColor Gray
+ollama pull llama3
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "  Failed to pull llama3. Check your internet connection." -ForegroundColor Red
+    exit 1
+}
+
+# Create Mythos model
+Write-Host "  Creating Mythos model..." -ForegroundColor Gray
+ollama create mythos -f Modelfile
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "  Failed to create model. Check Modelfile." -ForegroundColor Red
+    exit 1
+}
+Write-Host "  OK" -ForegroundColor Green
+Write-Host ""
+
+# ----- Step 3: Install mythos command -----
 Write-Host "[3/3] Installing 'mythos' command..." -ForegroundColor Yellow
 
 if (-not (Test-Path $BinDir)) {
     New-Item -ItemType Directory -Path $BinDir -Force | Out-Null
 }
 
-# Create mythos.cmd that points to the installed location
 @"
 @echo off
 set "MYTHOS_DIR=$InstallDir"
 if not exist "%MYTHOS_DIR%\mythos_cli.py" (
     echo [ERROR] Mythos not found at %MYTHOS_DIR%
-    echo Re-run the installer.
     pause
     exit /b 1
 )
@@ -89,12 +110,10 @@ if errorlevel 1 (
 
 Write-Host "  Installed to: $BinDir\mythos.cmd" -ForegroundColor Green
 
-# Add to current session PATH if not there
+# Add to PATH
 if ($env:PATH -notlike "*$BinDir*") {
     $env:PATH = "$BinDir;$env:PATH"
 }
-
-# Add to user PATH permanently
 try {
     $userPath = [Environment]::GetEnvironmentVariable("PATH", "User")
     if ($userPath -notlike "*$BinDir*") {
@@ -102,7 +121,6 @@ try {
         Write-Host "  Added to PATH permanently." -ForegroundColor Green
     }
 } catch {
-    Write-Host "  [!] Could not update PATH automatically." -ForegroundColor Gray
     Write-Host "  Run: set PATH=%USERPROFILE%\.local\bin;%PATH%" -ForegroundColor Gray
 }
 
@@ -110,5 +128,5 @@ Write-Host ""
 Write-Host "== Setup Complete! ==" -ForegroundColor Green
 Write-Host "Type 'mythos' in any terminal to start." -ForegroundColor Cyan
 Write-Host ""
-Write-Host "First time? You'll need an API token from:" -ForegroundColor Gray
+Write-Host "First time? Get your API token at:" -ForegroundColor Gray
 Write-Host "  https://samkomedved319-dev.github.io/Mythos" -ForegroundColor Gray

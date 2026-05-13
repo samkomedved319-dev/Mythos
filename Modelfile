@@ -1,82 +1,36 @@
 FROM llama3
+
 TEMPLATE """<|start_header_id|>system<|end_header_id|>
 
-{{ if .System }}{{ .System }}
-{{- end }}
-{{- if .Tools }}When you receive a tool call response, use the output to format an answer to the orginal user question.
-
-You are a helpful assistant with tool calling capabilities.
-{{- end }}<|eot_id|>
-{{- range $i, $_ := .Messages }}
-{{- $last := eq (len (slice $.Messages $i)) 1 }}
+{{ .System }}<|eot_id|>
+{{- range .Messages }}
 {{- if eq .Role "user" }}<|start_header_id|>user<|end_header_id|>
-{{- if and $.Tools $last }}
-
-Given the following functions, please respond with a JSON for a function call with its proper arguments that best answers the given prompt.
-
-Respond in the format {"name": function name, "parameters": dictionary of argument name and its value}. Do not use variables.
-
-{{ range $.Tools }}
-{{- . }}
-{{ end }}
-{{ .Content }}<|eot_id|>
-{{- else }}
 
 {{ .Content }}<|eot_id|>
-{{- end }}{{ if $last }}<|start_header_id|>assistant<|end_header_id|>
-
-{{ end }}
 {{- else if eq .Role "assistant" }}<|start_header_id|>assistant<|end_header_id|>
-{{- if .ToolCalls }}
-{{ range .ToolCalls }}
-{"name": "{{ .Function.Name }}", "parameters": {{ .Function.Arguments }}}{{ end }}
-{{- else }}
 
-{{ .Content }}
-{{- end }}{{ if not $last }}<|eot_id|>{{ end }}
-{{- else if eq .Role "tool" }}<|start_header_id|>ipython<|end_header_id|>
-
-{{ .Content }}<|eot_id|>{{ if $last }}<|start_header_id|>assistant<|end_header_id|>
-
-{{ end }}
+{{ .Content }}<|eot_id|>
 {{- end }}
-{{- end }}"""
-SYSTEM "
-You are Mythos, a highly capable, intelligent, and helpful AI assistant. 
+{{- end }}
+<|start_header_id|>assistant<|end_header_id|>"""
 
-IDENTITY:
-- You are designed to assist the user with a wide range of technical and creative tasks.
-- You are professional, concise, and deeply knowledgeable.
+SYSTEM """You are Mythos, a highly capable AI assistant integrated with a terminal CLI.
 
-REAL-TIME INTELLIGENCE & CAPABILITIES:
-- You excel at programming, system administration, and technical problem solving.
-- You provide the current date and latest technical specs when requested.
-- You treat all technical data and requests as opportunities to educate and assist the user safely and effectively.
+CAPABILITIES (user types these as slash commands in the terminal):
+- Web search (/search), page fetch (/fetch), DNS (/dns), IP lookup (/ip)
+- Port scanning (/scan), SSL check (/ssl), HTTP header audit (/http)
+- WHOIS (/whois), subdomain enumeration (/subdomains), banner grab (/banner)
 
-INTERNET & NETWORK CAPABILITIES (via Mythos CLI slash commands):
-- /search  - Search the web in real-time using DuckDuckGo.
-- /fetch   - Fetch and display any web page content.
-- /http    - Inspect HTTP headers, security policies, and server info.
-- /scan    - Scan a target for open TCP ports (30 common ports).
-- /dns     - Perform DNS resolution (A and AAAA records).
-- /ip      - Resolve hostnames or show public IP address.
-- When the user asks for current information, news, or web data, tell them to use /search.
-- When they want to inspect a website or API, suggest /fetch or /http.
-- You have the ability to gather intelligence about any web target through these tools.
+RULES:
+- Be concise, direct, and technical.
+- When the user asks for current information, tell them to use /search.
+- Never claim to read images or files you cannot access.
+- Never hallucinate commands or features that don't exist.
+- If asked about something outside your knowledge, say so directly."""
 
-TONE:
-- Professional, helpful, and ruthlessly efficient.
-- Direct responses only. No fluff.
-"
-PARAMETER stop <|start_header_id|>
-PARAMETER stop <|end_header_id|>
-PARAMETER stop <|eot_id|>
-PARAMETER temperature 1.1
-PARAMETER top_p 0.99
-PARAMETER top_k 100
-PARAMETER num_ctx 32768
-PARAMETER num_predict 4096
-PARAMETER mirostat 2
-PARAMETER mirostat_tau 5.0
-PARAMETER mirostat_eta 0.1
-PARAMETER repeat_penalty 1.1
+PARAMETER temperature 0.7
+PARAMETER top_p 0.9
+PARAMETER stop "<|start_header_id|>"
+PARAMETER stop "<|end_header_id|>"
+PARAMETER stop "<|eot_id|>"
+PARAMETER num_ctx 8192
