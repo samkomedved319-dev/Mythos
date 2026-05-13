@@ -14,9 +14,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urlparse
 from rich.console import Console
 from rich.markdown import Markdown
-from rich.live import Live
 from rich.theme import Theme
-from rich.status import Status
 from rich.panel import Panel
 from rich.prompt import Prompt
 from rich.table import Table
@@ -67,7 +65,10 @@ custom_theme = Theme({
     "dim":        "dim white",
     "accent":     "bold cyan",
 })
-console = Console(theme=custom_theme, safe_box=True, legacy_windows=True)
+# Disable colors in non-interactive shells or when TERM is not set (Windows PowerShell fix)
+_no_color = os.environ.get("NO_COLOR") or not sys.stdout.isatty()
+_color_system = None if _no_color else "auto"
+console = Console(theme=custom_theme, safe_box=True, legacy_windows=bool(os.name == "nt"), color_system=_color_system)
 
 # ---------------------------------------------------------------------------
 #  TOOL CALL RENDERING  (Claude Code style -- ">" prefix, clean separator)
@@ -159,7 +160,7 @@ def require_auth():
     if email and token and is_valid_token(token):
         return True
 
-    console.clear()
+    clear_screen()
     console.print()
     console.print(Panel(
         "[bold]Welcome to Mythos -- Sovereign Architect[/bold]\n\n"
@@ -403,6 +404,10 @@ def banner_grab(host, port, timeout=3):
 #  UTILITY
 # ---------------------------------------------------------------------------
 
+def clear_screen():
+    """Move terminal content out of view cleanly."""
+    print()
+
 def check_stop_key():
     if msvcrt.kbhit():
         if ord(msvcrt.getch()) == 27:
@@ -429,7 +434,7 @@ async def chat():
     email = get_stored_email()
     role  = get_user_role(email)
 
-    console.clear()
+    clear_screen()
     console.print("  " + "-" * 50)
     console.print(f"  [accent]Mythos[/accent] [dim]| {email} [/dim]" + ("[warning] Admin[/warning]" if role == "admin" else "") + f" [dim]| model: {MODEL_NAME}[/dim]")
     console.print(f"  [dim]Type /help for commands, /exit to quit[/dim]")
@@ -457,7 +462,7 @@ async def chat():
 
                 elif cmd == '/clear':
                     messages = []
-                    console.clear()
+                    clear_screen()
                     console.print("  " + "-" * 50)
                     console.print(f"  [accent]Mythos[/accent] [dim]| {email}[/dim]" + ("[warning] Admin[/warning]" if role == "admin" else "") + f" [dim]| model: {MODEL_NAME}[/dim]")
                     console.print("  " + "-" * 50)
@@ -848,46 +853,42 @@ async def chat():
             # Send to AI model
             messages.append({"role": "user", "content": user_input})
             full_response = ""
-
-            # Tool-call-style header
             tool_header("think")
 
             payload = {"model": MODEL_NAME, "messages": messages, "stream": True}
-
             while msvcrt.kbhit(): msvcrt.getch()
 
-            with Live("", console=console, refresh_per_second=15, vertical_overflow="visible") as live:
-                live.update(Status("[dim italic]Thinking...[/dim italic]", spinner="dots", console=console))
-                try:
-                    async with httpx.AsyncClient() as client:
-                        async with client.stream("POST", OLLAMA_URL, json=payload, timeout=None) as resp:
-                            if resp.status_code != 200:
-                                live.update(f"[error]Ollama returned {resp.status_code}[/error]")
-                                continue
-                            started = False
-                            async for line in resp.aiter_lines():
-                                if check_stop_key():
-                                    live.update(Markdown(full_response + "\n\n[yellow italic](Stopped)[/yellow italic]"))
-                                    break
-                                if line:
-                                    try:
-                                        chunk = json.loads(line)
-                                        content = chunk.get("message", {}).get("content", "")
-                                        if not started and content:
+            console.print("  [dim]Thinking...[/dim]")
+            try:
+                async with httpx.AsyncClient() as client:
+                    async with client.stream("POST", OLLAMA_URL, json=payload, timeout=None) as resp:
+                        if resp.status_code != 200:
+                            console.print(f"  [error]Ollama error: {resp.status_code}[/error]")
+                            continue
+                        started = False
+                        async for line in resp.aiter_lines():
+                            if check_stop_key():
+                                if full_response:
+                                    console.print(Markdown(full_response))
+                                    console.print("  [yellow italic](Stopped)[/yellow italic]")
+                                break
+                            if line:
+                                try:
+                                    chunk = json.loads(line)
+                                    content = chunk.get("message", {}).get("content", "")
+                                    if content:
+                                        if not started:
                                             started = True
-                                            full_response = content
-                                        else:
-                                            full_response += content
-                                        if full_response:
-                                            live.update(Markdown(full_response))
-                                    except json.JSONDecodeError:
-                                        pass
-                            if not full_response and not started:
-                                live.update("[dim italic]... no response ...[/dim italic]")
-                except Exception as e:
-                    live.update(f"[error]Connection Error: {e}[/error]")
+                                        full_response += content
+                                except json.JSONDecodeError:
+                                    pass
+                        if started and full_response:
+                            console.print(Markdown(full_response))
+                        elif not full_response:
+                            console.print("  [dim]No response[/dim]")
+            except Exception as e:
+                console.print(f"  [error]Error: {e}[/error]")
 
-            console.print("")
             messages.append({"role": "assistant", "content": full_response})
 
         except KeyboardInterrupt:
