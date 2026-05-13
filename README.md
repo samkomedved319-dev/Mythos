@@ -1,60 +1,70 @@
-# 🏛️ Mythos: Sovereign Architect
+# Mythos: Sovereign Architect
 
-A high-performance, minimalistic terminal interface for the Mythos AI model. Designed for speed, clarity, and sovereign authority.
+A high-performance terminal interface for the Mythos AI model with web search,
+network scanning, security auditing, and real-time AI chat.
 
----
+## One-Command Install (Windows)
 
-## ⚡ Easy Installation (Windows)
-
-The fastest way to get Mythos up and running. Simply copy and paste the command below into your **PowerShell** terminal:
+Open **PowerShell** and paste this:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/samkomedved319-dev/Mythos/main/install.ps1 | iex"
 ```
 
-*This command will automatically download the repository, install dependencies, build the Ollama model, and set up the `mythos` command.*
+This downloads the repo, installs dependencies, builds the AI model, and sets up
+the `mythos` command. After it finishes, just type:
 
----
+```
+mythos
+```
 
-## ✨ Features
+## Requirements
 
-- **🚀 Instant Execution**: Start your session by just typing `mythos`.
-- **📟 Minimalist UI**: Non-intrusive, sleek terminal flow inspired by Claude Code.
-- **📝 Rich Markdown**: Beautifully rendered responses with syntax highlighting for code.
-- **🔄 Live Streaming**: Real-time response generation with a subtle thinking spinner.
-- **⌨️ Advanced Controls**:
-  - `ESC`: Stop a response immediately.
-  - `/clear`: Wipe session history and clear the screen.
-  - `/help`: Show all available commands.
+1. **Python 3.10+** (with pip in PATH)
+2. **Ollama** — [Download here](https://ollama.com/) (must be running)
 
----
+## Quick Start (if you already cloned the repo)
 
-## 🛠️ Requirements
+Double-click `setup.bat` or run:
 
-1.  **Python 3.10+** (Ensure `pip` is in your PATH)
-2.  **Ollama**: [Download here](https://ollama.com/)
+```
+setup.bat
+```
 
----
+Then type `mythos` anywhere.
 
-## 🏗️ Manual Installation
+## First-Time Auth
 
-### Windows
-1.  Clone the repository: `git clone https://github.com/samkomedved319-dev/Mythos.git`
-2.  Enter the directory: `cd Mythos`
-3.  Run the setup: `.\install.ps1`
+1. Type `mythos` in your terminal
+2. It shows a link to the Mythos web portal
+3. Open the link, sign up, get your email + API token
+4. Paste them back in the terminal
+5. Done -- next time just type `mythos`
 
-### Linux / macOS
-1.  Install dependencies: `pip install -r requirements.txt`
-2.  Build the model: `ollama create mythos -f Modelfile`
-3.  Run: `python mythos_cli.py`
+## Commands
 
----
+| Command | What it does |
+|---------|-------------|
+| `/help` | Show all commands |
+| `/search <q>` | Search the web (DuckDuckGo) |
+| `/fetch <url>` | Fetch a web page |
+| `/scan <host>` | Scan for open TCP ports |
+| `/ssl <host>` | Inspect SSL certificate |
+| `/whois <domain>` | WHOIS domain lookup |
+| `/subdomains <domain>` | Find common subdomains |
+| `/banner <host> <port>` | Grab service banner |
+| `/dns <domain>` | DNS resolution |
+| `/http <url>` | HTTP headers & security |
+| `/ip [host]` | Resolve IP / show public IP |
+| `/status` | System health |
+| `/doctor` | Full diagnostics |
+| `/session` | Session info |
+| `/auth` | Auth status |
+| `/reauth` | Re-authenticate |
+| `/logout` | Clear credentials |
+| `/clear` | Clear chat |
+| `/exit` | Quit |
 
-## ⚖️ License
-MIT License. 
+## License
 
----
-<p align="center">
-  <b>M y t h o s</b><br>
-  <i>Sovereign Architect CLI</i>
-</p>
+MIT

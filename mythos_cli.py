@@ -67,7 +67,7 @@ custom_theme = Theme({
     "dim":        "dim white",
     "accent":     "bold cyan",
 })
-console = Console(theme=custom_theme)
+console = Console(theme=custom_theme, safe_box=True, legacy_windows=True)
 
 # ---------------------------------------------------------------------------
 #  TOOL CALL RENDERING  (Claude Code style -- ">" prefix, clean separator)
