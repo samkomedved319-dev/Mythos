@@ -2,24 +2,25 @@
    Mythos: Sovereign Architect — Client-Side Auth
    Uses localStorage; token-based flow for CLI integration.
    First account (samkomedved319@gmail.com) = Admin.
+   Supports seamless CLI callback via ?cli_port=PORT
    ============================================================ */
 
 (function () {
   'use strict';
 
-  const STORAGE_KEYS = {
+  var STORAGE_KEYS = {
     users:   'mythos_users',
     session: 'mythos_session',
   };
 
-  const ADMIN_EMAIL = 'samkomedved319@gmail.com';
+  var ADMIN_EMAIL = 'samkomedved319@gmail.com';
 
   // ---------- Helpers ----------
 
   function getUsers() {
     try {
       return JSON.parse(localStorage.getItem(STORAGE_KEYS.users)) || {};
-    } catch {
+    } catch (e) {
       return {};
     }
   }
@@ -31,7 +32,7 @@
   function getSession() {
     try {
       return JSON.parse(localStorage.getItem(STORAGE_KEYS.session)) || null;
-    } catch {
+    } catch (e) {
       return null;
     }
   }
@@ -45,11 +46,11 @@
   }
 
   function generateToken() {
-    const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-    const segments = [];
-    for (let s = 0; s < 4; s++) {
-      let seg = '';
-      for (let i = 0; i < 8; i++) {
+    var chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+    var segments = [];
+    for (var s = 0; s < 4; s++) {
+      var seg = '';
+      for (var i = 0; i < 8; i++) {
         seg += chars.charAt(Math.floor(Math.random() * chars.length));
       }
       segments.push(seg);
@@ -58,9 +59,9 @@
   }
 
   function getCurrentUser() {
-    const session = getSession();
+    var session = getSession();
     if (!session || !session.email) return null;
-    const users = getUsers();
+    var users = getUsers();
     return users[session.email] || null;
   }
 
@@ -68,36 +69,66 @@
     return email && email.toLowerCase() === ADMIN_EMAIL;
   }
 
-  /** Determine role: 'admin' if first-ever account is admin email, else 'user' */
   function determineRole(email) {
-    const users = getUsers();
-    const userCount = Object.keys(users).length;
-    // If this is the first account AND it matches admin email → admin
+    var users = getUsers();
+    var userCount = Object.keys(users).length;
     if (userCount === 0 && isAdminEmail(email)) {
       return 'admin';
     }
-    // If the user already has a stored role, preserve it
     if (users[email] && users[email].role) {
       return users[email].role;
     }
     return 'user';
   }
 
+  /** Get the CLI callback port from sessionStorage (saved from URL param) */
+  function getCliPort() {
+    return sessionStorage.getItem('mythos_cli_port');
+  }
+
+  /** Notify the local CLI server that auth succeeded, then remove the port. */
+  function notifyCliServer(email, token, name, role) {
+    var port = getCliPort();
+    if (!port) return;
+    sessionStorage.removeItem('mythos_cli_port');
+
+    var callbackUrl = 'http://localhost:' + port +
+      '/auth?email=' + encodeURIComponent(email) +
+      '&token=' + encodeURIComponent(token) +
+      '&name=' + encodeURIComponent(name || email) +
+      '&role=' + encodeURIComponent(role || 'user');
+
+    // Use an image beacon (works across origins, no CORS issues)
+    try {
+      var img = new Image();
+      img.src = callbackUrl;
+    } catch (e) {
+      // Silently fall back — user will see the dashboard
+    }
+  }
+
   // ---------- DOM Ready ----------
 
   document.addEventListener('DOMContentLoaded', function () {
-    // Update navbar based on auth state
-    const navRight = document.getElementById('nav-right');
+
+    // ---- Capture cli_port from URL and store in sessionStorage ----
+    var urlParams = new URLSearchParams(window.location.search);
+    var cliPort = urlParams.get('cli_port');
+    if (cliPort) {
+      sessionStorage.setItem('mythos_cli_port', cliPort);
+    }
+
+    // ---- Update navbar based on auth state ----
+    var navRight = document.getElementById('nav-right');
     if (navRight) {
-      const user = getCurrentUser();
+      var user = getCurrentUser();
       if (user) {
-        const badge = user.role === 'admin' ? '👑 Admin' : '';
-        navRight.innerHTML = `
-          <a href="dashboard.html">Dashboard</a>
-          ${badge ? '<span style="font-size:0.8rem;color:var(--warning);font-family:var(--font-mono);">' + badge + '</span>' : ''}
-          <a href="#" id="nav-logout" style="color: var(--text-muted);">Logout</a>
-        `;
-        const logoutLink = document.getElementById('nav-logout');
+        var badge = user.role === 'admin' ? '👑 Admin' : '';
+        navRight.innerHTML =
+          '<a href="dashboard.html">Dashboard</a>' +
+          (badge ? '<span style="font-size:0.8rem;color:var(--warning);font-family:var(--font-mono);">' + badge + '</span>' : '') +
+          '<a href="#" id="nav-logout" style="color: var(--text-muted);">Logout</a>';
+        var logoutLink = document.getElementById('nav-logout');
         if (logoutLink) {
           logoutLink.addEventListener('click', function (e) {
             e.preventDefault();
@@ -106,16 +137,14 @@
           });
         }
       } else {
-        navRight.innerHTML = `
-          <a href="login.html">Login</a>
-          <a href="signup.html" class="btn btn-primary btn-sm">Sign Up</a>
-        `;
+        navRight.innerHTML =
+          '<a href="login.html">Login</a>' +
+          '<a href="signup.html" class="btn btn-primary btn-sm">Sign Up</a>';
       }
     }
 
-    // Page-specific init
-    const page = document.body.dataset.page;
-
+    // ---- Page-specific init ----
+    var page = document.body.dataset.page;
     if (page === 'signup')    initSignup();
     if (page === 'login')     initLogin();
     if (page === 'dashboard') initDashboard();
@@ -125,22 +154,19 @@
   // ---------- Home ----------
 
   function initHome() {
-    const user = getCurrentUser();
-    const cta = document.getElementById('hero-cta');
+    var user = getCurrentUser();
+    var cta = document.getElementById('hero-cta');
     if (cta && user) {
-      cta.innerHTML = `
-        <a href="dashboard.html" class="btn btn-primary">Go to Dashboard</a>
-      `;
+      cta.innerHTML = '<a href="dashboard.html" class="btn btn-primary">Go to Dashboard</a>';
     }
   }
 
   // ---------- Signup ----------
 
   function initSignup() {
-    const form = document.getElementById('signup-form');
+    var form = document.getElementById('signup-form');
     if (!form) return;
 
-    // Redirect if already logged in
     if (getCurrentUser()) {
       window.location.href = 'dashboard.html';
       return;
@@ -149,68 +175,62 @@
     form.addEventListener('submit', function (e) {
       e.preventDefault();
 
-      const name     = document.getElementById('signup-name').value.trim();
-      const email    = document.getElementById('signup-email').value.trim().toLowerCase();
-      const password = document.getElementById('signup-password').value;
-      const confirm  = document.getElementById('signup-confirm').value;
+      var name     = document.getElementById('signup-name').value.trim();
+      var email    = document.getElementById('signup-email').value.trim().toLowerCase();
+      var password = document.getElementById('signup-password').value;
+      var confirm  = document.getElementById('signup-confirm').value;
 
-      // Reset errors
-      document.querySelectorAll('.form-error').forEach(el => el.style.display = 'none');
-      document.querySelectorAll('.form-input').forEach(el => el.classList.remove('error'));
+      document.querySelectorAll('.form-error').forEach(function (el) { el.style.display = 'none'; });
+      document.querySelectorAll('.form-input').forEach(function (el) { el.classList.remove('error'); });
 
-      let valid = true;
+      var valid = true;
 
       if (!name || name.length < 2) {
         showError('signup-name', 'Name must be at least 2 characters');
         valid = false;
       }
-
       if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
         showError('signup-email', 'Please enter a valid email address');
         valid = false;
       }
-
       if (!password || password.length < 6) {
         showError('signup-password', 'Password must be at least 6 characters');
         valid = false;
       }
-
       if (password !== confirm) {
         showError('signup-confirm', 'Passwords do not match');
         valid = false;
       }
-
       if (!valid) return;
 
-      const users = getUsers();
+      var users = getUsers();
 
       if (users[email]) {
         showError('signup-email', 'An account with this email already exists');
         return;
       }
 
-      // Determine role: first account to register with admin email becomes admin
-      const role = determineRole(email);
+      var role = determineRole(email);
+      var token = generateToken();
 
-      // Create user
-      const token = generateToken();
       users[email] = {
         name: name,
         email: email,
-        password: btoa(password), // simple obfuscation (static site, no real backend)
+        password: btoa(password),
         token: token,
         role: role,
         createdAt: new Date().toISOString(),
       };
       saveUsers(users);
 
-      // Auto-login
       setSession({ email: email, name: name, token: token, role: role });
 
-      // Show success message with role info
-      const successEl = document.getElementById('signup-success');
+      // ---- Notify local CLI server (if cli_port was set) ----
+      notifyCliServer(email, token, name, role);
+
+      var successEl = document.getElementById('signup-success');
       if (successEl) {
-        const roleMsg = role === 'admin'
+        var roleMsg = role === 'admin'
           ? '👑 Admin account created! You are the owner of Mythos.'
           : 'Account created!';
         successEl.textContent = roleMsg + ' Redirecting to dashboard...';
@@ -218,6 +238,8 @@
       }
 
       setTimeout(function () {
+        // If there's a CLI port, the CLI server already got the token.
+        // Redirect to dashboard (or back to CLI via the port was already done).
         window.location.href = 'dashboard.html';
       }, 1500);
     });
@@ -226,10 +248,9 @@
   // ---------- Login ----------
 
   function initLogin() {
-    const form = document.getElementById('login-form');
+    var form = document.getElementById('login-form');
     if (!form) return;
 
-    // Redirect if already logged in
     if (getCurrentUser()) {
       window.location.href = 'dashboard.html';
       return;
@@ -238,17 +259,15 @@
     form.addEventListener('submit', function (e) {
       e.preventDefault();
 
-      const email    = document.getElementById('login-email').value.trim().toLowerCase();
-      const password = document.getElementById('login-password').value;
+      var email    = document.getElementById('login-email').value.trim().toLowerCase();
+      var password = document.getElementById('login-password').value;
 
-      // Reset errors
-      document.querySelectorAll('.form-error').forEach(el => el.style.display = 'none');
-      document.querySelectorAll('.form-input').forEach(el => el.classList.remove('error'));
-      const alertEl = document.getElementById('login-alert');
+      document.querySelectorAll('.form-error').forEach(function (el) { el.style.display = 'none'; });
+      document.querySelectorAll('.form-input').forEach(function (el) { el.classList.remove('error'); });
+      var alertEl = document.getElementById('login-alert');
       if (alertEl) alertEl.classList.add('hidden');
 
-      let valid = true;
-
+      var valid = true;
       if (!email) {
         showError('login-email', 'Please enter your email');
         valid = false;
@@ -259,8 +278,8 @@
       }
       if (!valid) return;
 
-      const users = getUsers();
-      const user = users[email];
+      var users = getUsers();
+      var user = users[email];
 
       if (!user || user.password !== btoa(password)) {
         if (alertEl) {
@@ -270,13 +289,16 @@
         return;
       }
 
-      // Login success
       setSession({
         email: user.email,
         name: user.name,
         token: user.token,
         role: user.role || 'user',
       });
+
+      // ---- Notify local CLI server (if cli_port was set) ----
+      notifyCliServer(user.email, user.token, user.name, user.role);
+
       window.location.href = 'dashboard.html';
     });
   }
@@ -284,24 +306,25 @@
   // ---------- Dashboard ----------
 
   function initDashboard() {
-    const user = getCurrentUser();
+    var user = getCurrentUser();
     if (!user) {
       window.location.href = 'login.html';
       return;
     }
 
-    const isAdmin = user.role === 'admin';
+    var isAdmin = user.role === 'admin';
 
-    // Display user name
-    const nameEl = document.getElementById('dashboard-name');
+    // Check if we came from a CLI auth callback
+    var urlParams = new URLSearchParams(window.location.search);
+    var authSuccess = urlParams.get('auth');
+
+    var nameEl = document.getElementById('dashboard-name');
     if (nameEl) nameEl.textContent = user.name;
 
-    // Display email
-    const emailEl = document.getElementById('dashboard-email');
+    var emailEl = document.getElementById('dashboard-email');
     if (emailEl) emailEl.textContent = user.email;
 
-    // Display role badge
-    const roleBadge = document.getElementById('dashboard-role');
+    var roleBadge = document.getElementById('dashboard-role');
     if (roleBadge) {
       if (isAdmin) {
         roleBadge.innerHTML = '👑 Admin / Owner';
@@ -312,29 +335,33 @@
       }
     }
 
-    // Display token
-    const tokenEl = document.getElementById('dashboard-token');
+    var tokenEl = document.getElementById('dashboard-token');
     if (tokenEl) tokenEl.textContent = user.token;
 
-    // Show/hide admin panel
-    const adminPanel = document.getElementById('admin-panel');
+    // Auth success banner (redirected from CLI callback)
+    var authBanner = document.getElementById('auth-success-banner');
+    if (authBanner && authSuccess === 'success') {
+      authBanner.classList.remove('hidden');
+    }
+
+    // Admin panel
+    var adminPanel = document.getElementById('admin-panel');
     if (adminPanel) {
       if (isAdmin) {
         adminPanel.classList.remove('hidden');
-        // Populate admin info
-        const users = getUsers();
-        const totalUsers = Object.keys(users).length;
-        const adminUserCount = document.getElementById('admin-user-count');
+        var users = getUsers();
+        var totalUsers = Object.keys(users).length;
+        var adminUserCount = document.getElementById('admin-user-count');
         if (adminUserCount) adminUserCount.textContent = totalUsers;
-        const adminEmailShow = document.getElementById('admin-email-show');
+        var adminEmailShow = document.getElementById('admin-email-show');
         if (adminEmailShow) adminEmailShow.textContent = user.email;
       } else {
         adminPanel.classList.add('hidden');
       }
     }
 
-    // Copy token button
-    const copyBtn = document.getElementById('token-copy');
+    // Copy token
+    var copyBtn = document.getElementById('token-copy');
     if (copyBtn) {
       copyBtn.addEventListener('click', function () {
         navigator.clipboard.writeText(user.token).then(function () {
@@ -346,9 +373,9 @@
           }, 2000);
         }).catch(function () {
           if (tokenEl) {
-            const range = document.createRange();
+            var range = document.createRange();
             range.selectNodeContents(tokenEl);
-            const sel = window.getSelection();
+            var sel = window.getSelection();
             sel.removeAllRanges();
             sel.addRange(range);
           }
@@ -357,16 +384,11 @@
     }
 
     // Copy setup command
-    const setupCopyBtn = document.getElementById('setup-copy');
+    var setupCopyBtn = document.getElementById('setup-copy');
     if (setupCopyBtn) {
       setupCopyBtn.addEventListener('click', function () {
-        const setupCmd =
-`# Run this in your terminal to authenticate Mythos:
-python mythos_cli.py
-
-# When prompted, enter:
-#   Email: ${user.email}
-#   Token: ${user.token}`;
+        var setupCmd =
+'# Authenticate Mythos CLI:\npython mythos_cli.py\n\n# When prompted, enter:\n#   Email: ' + user.email + '\n#   Token: ' + user.token;
         navigator.clipboard.writeText(setupCmd).then(function () {
           setupCopyBtn.textContent = 'Copied!';
           setupCopyBtn.classList.add('copied');
@@ -379,7 +401,7 @@ python mythos_cli.py
     }
 
     // Logout
-    const logoutBtn = document.getElementById('dashboard-logout');
+    var logoutBtn = document.getElementById('dashboard-logout');
     if (logoutBtn) {
       logoutBtn.addEventListener('click', function (e) {
         e.preventDefault();
@@ -392,10 +414,10 @@ python mythos_cli.py
   // ---------- Utilities ----------
 
   function showError(inputId, message) {
-    const input = document.getElementById(inputId);
+    var input = document.getElementById(inputId);
     if (input) {
       input.classList.add('error');
-      const errorEl = input.parentElement.querySelector('.form-error');
+      var errorEl = input.parentElement.querySelector('.form-error');
       if (errorEl) {
         errorEl.textContent = message;
         errorEl.style.display = 'block';

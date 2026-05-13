@@ -26,6 +26,12 @@
   <!-- Dashboard -->
   <div class="dashboard-page">
     <div class="container">
+
+      <!-- Auth success banner (redirected from CLI callback) -->
+      <div id="auth-success-banner" class="alert alert-success hidden" style="margin-bottom: 24px;">
+        ✅ Authentication successful! The Mythos CLI has been notified. You can close this page and return to your terminal.
+      </div>
+
       <div class="dashboard-header">
         <div>
           <h1>Welcome, <span id="dashboard-name">—</span></h1>
@@ -84,9 +90,11 @@
             <div class="setup-step">
               <span class="step-num">4</span>
               <span class="step-text">
-                Run the CLI and authenticate:
+                Run the CLI — <strong>seamless browser auth</strong>:
                 <br /><code>python mythos_cli.py</code>
-                <br />Enter your <strong>email</strong> and <strong>token</strong> when prompted.
+                <br />A link will appear. Click it, log in on the website,
+                <br />and the CLI authenticates automatically.
+                <br /><span style="color: var(--text-muted); font-size: 0.8rem;">(Manual entry also available as fallback)</span>
               </span>
             </div>
           </div>

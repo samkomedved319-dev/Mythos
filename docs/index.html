@@ -23,6 +23,16 @@
     </div>
   </nav>
 
+  <!-- CLI Auth Banner (shown when redirected from CLI with ?cli_port=) -->
+  <div id="cli-auth-banner" class="hidden" style="background: rgba(108, 92, 231, 0.1); border-bottom: 1px solid var(--border); padding: 12px 0;">
+    <div class="container" style="display: flex; align-items: center; gap: 16px; justify-content: space-between; flex-wrap: wrap;">
+      <span style="color: var(--accent); font-size: 0.9rem;">
+        🔗 Connected from <strong>Mythos CLI</strong> — authenticate to continue in your terminal.
+      </span>
+      <a href="signup.html" class="btn btn-primary btn-sm" id="cli-auth-cta">Sign Up to Link</a>
+    </div>
+  </div>
+
   <!-- Hero -->
   <section class="hero">
     <div class="container">
@@ -117,5 +127,32 @@
   </footer>
 
   <script src="js/auth.js"></script>
+  <script>
+    // Show CLI auth banner if we have a cli_port in the URL,
+    // and pass cli_port to all auth links so sessionStorage has it.
+    (function() {
+      var params = new URLSearchParams(window.location.search);
+      var port = params.get('cli_port');
+
+      // Show the CLI-connected banner
+      var banner = document.getElementById('cli-auth-banner');
+      var cta = document.getElementById('cli-auth-cta');
+      if (banner && port) {
+        banner.classList.remove('hidden');
+        if (cta) cta.href = 'signup.html?cli_port=' + encodeURIComponent(port);
+      }
+
+      // Append cli_port to all internal nav/auth links
+      if (port) {
+        var links = document.querySelectorAll('a[href*="signup.html"], a[href*="login.html"]');
+        for (var i = 0; i < links.length; i++) {
+          var href = links[i].getAttribute('href');
+          if (href && href.indexOf('cli_port') === -1) {
+            links[i].setAttribute('href', href + (href.indexOf('?') > -1 ? '&' : '?') + 'cli_port=' + encodeURIComponent(port));
+          }
+        }
+      }
+    })();
+  </script>
 </body>
 </html>
